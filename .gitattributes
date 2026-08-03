@@ -1,0 +1,28 @@
+# เก็บใน repo เป็น LF เสมอ แล้วแปลงตอน checkout ตามกฎข้างล่าง
+* text=auto
+
+# .ps1 ต้องเป็น CRLF ตอน checkout — PowerShell 5.1 บนเครื่อง Windows
+# (ตัว BOM ถูกเก็บใน blob อยู่แล้ว กฎนี้คุมแค่ line ending)
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# ฝั่ง Python/config บังคับ LF ให้เหมือนกันทุกเครื่อง
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# binary — ห้าม git แตะ line ending และไม่ต้องทำ diff
+*.xlsx binary
+*.xls binary
+*.db binary
+*.png binary
+*.jpg binary
+*.ico binary
