@@ -20,11 +20,37 @@ log = get_logger()
 TH = timezone(timedelta(hours=7))
 
 SEL = {
-    "export_btn": ['button:has-text("ส่งออก")', 'button:has-text("Export")'],
+    # ⚠️ หน้าจริง (2026-08) ปุ่มชื่อ "ดาวน์โหลด" ไม่ใช่ "ส่งออก"
+    # เหลือ "ส่งออก"/"Export" ไว้ท้ายเผื่อ TikTok เปลี่ยนคำกลับ
+    "export_btn": ['button:has-text("ดาวน์โหลด")', 'button:has-text("Download")',
+                   'button:has-text("ส่งออก")', 'button:has-text("Export")'],
+    # ขอบเขตที่ต้องเลือกในแผง — "คำสั่งซื้อที่กรอง" คือชุดที่ตรงกับช่วงวันที่ใน URL
+    # อีก 2 ตัวเลือกคือ "ทั้งหมดที่รอการจัดส่ง" กับ "ทั้งหมดภายใต้แท็บปัจจุบัน" ซึ่งไม่สนช่วงวันที่
+    "scope_filtered": ['label:has-text("คำสั่งซื้อที่กรอง")', 'text=/คำสั่งซื้อที่กรอง/',
+                       'label:has-text("Filtered orders")'],
     "excel_radio": ['label:has-text("Excel")', 'text="Excel"'],
+    # ปุ่มยืนยันในแผง ชื่อ "ส่งออก" (ต่างจากปุ่มนอกแผงที่ชื่อ "ดาวน์โหลด")
+    "confirm_btn": ['button:has-text("ส่งออก")', 'button:has-text("Export")'],
     "history_rows": ['text=/คำสั่งซื้อ-\\d{4}-\\d{2}-\\d{2}/'],
-    "download_btn": ['button:has-text("ดาวน์โหลด")', 'button:has-text("Download")'],
+    # ⚠️ ปุ่มในแถวประวัติใช้คำว่า "ดาวน์โหลด" เหมือนปุ่มเปิดแผงเป๊ะ
+    # แยกกันที่ขนาด: ในแถว = p-btn-size-small, ปุ่มเปิดแผง = p-btn-size-default
+    # ถ้าไม่ระบุจะไปกดปุ่มนอกที่ถูก drawer บังอยู่ แล้วค้างจน timeout
+    "download_btn": ['button.p-btn-size-small:has-text("ดาวน์โหลด")',
+                     'button.p-btn-size-small:has-text("Download")'],
 }
+
+
+def _click_first(page, keys: list[str], timeout: int = 8000) -> bool:
+    """ไล่ลอง selector ทีละตัวจนกดติด — คัดลอกแนวเดียวกับ adapters/lazada.py"""
+    for sel in keys:
+        loc = page.locator(sel).first
+        try:
+            loc.wait_for(state="visible", timeout=timeout)
+            loc.click()
+            return True
+        except Exception:                                # noqa: BLE001
+            continue
+    return False
 
 
 def _epoch_ms(day: date, end_of_day: bool) -> int:
@@ -63,6 +89,8 @@ class TiktokAdapter(PlaywrightAdapter):
         try:
             return self._do_export(page)
         except AdapterError:
+            # เดิมไม่ถ่ายภาพในเคสนี้ ทำให้ selector พังแล้วไล่สาเหตุไม่ได้
+            self._screenshot_on_error(page, "export_failed")
             raise
         except Exception as exc:                         # noqa: BLE001
             self._screenshot_on_error(page, "export_failed")
@@ -73,43 +101,66 @@ class TiktokAdapter(PlaywrightAdapter):
             ) from exc
 
     def _do_export(self, page) -> Path:
-        # เปิดแผงส่งออก
-        opened = False
-        for sel in SEL["export_btn"]:
-            loc = page.locator(sel).first
-            try:
-                loc.wait_for(state="visible", timeout=10_000)
-                loc.click()
-                opened = True
-                break
-            except Exception:                            # noqa: BLE001
-                continue
-        if not opened:
-            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่ม "ส่งออก" ไม่เจอ')
-        page.wait_for_timeout(1500)
+        # เปิดแผง — ปุ่มนอกชื่อ "ดาวน์โหลด"
+        if not _click_first(page, SEL["export_btn"], 10_000):
+            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่ม "ดาวน์โหลด" ไม่เจอ')
+        page.wait_for_timeout(2500)
+
+        # ⚠️ ต้องเลือก "คำสั่งซื้อที่กรอง" ก่อนเสมอ
+        # ค่าเริ่มต้นของแผงไม่ใช่ตัวนี้ ถ้าไม่เลือกจะได้ออเดอร์ผิดชุด
+        # (หน้าเว็บเตือนเองว่า "ไม่เลือกช่วงเวลา = ดาวน์โหลด 12 เดือนย้อนหลัง")
+        if not _click_first(page, SEL["scope_filtered"], 6000):
+            raise AdapterError(
+                ErrorType.PARSE_ERROR,
+                'เลือกขอบเขต "คำสั่งซื้อที่กรอง" ไม่ได้ — หยุดก่อน '
+                "เพราะเสี่ยงได้ข้อมูลคนละช่วงวันที่โดยไม่รู้ตัว",
+            )
+        page.wait_for_timeout(1000)
 
         # เลือกฟอร์แมต Excel (ค่าเริ่มต้นมักเป็น Excel อยู่แล้ว แต่ยืนยันให้ชัวร์)
-        for sel in SEL["excel_radio"]:
-            try:
-                page.locator(sel).first.click(timeout=3000)
-                break
-            except Exception:                            # noqa: BLE001
-                continue
+        _click_first(page, SEL["excel_radio"], 4000)
 
         before = self._history_labels(page)
 
-        # ปุ่ม "ส่งออก" ในแผง (ตัวสุดท้ายบนหน้า = ปุ่มในแผงที่เพิ่งเปิด)
-        page.locator(SEL["export_btn"][0]).last.click()
-        page.wait_for_timeout(2000)
+        if not _click_first(page, SEL["confirm_btn"], 8000):
+            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่มยืนยัน "ส่งออก" ในแผงไม่เจอ')
+        page.wait_for_timeout(2500)
 
         new_label = self._wait_for_new_file(page, before)
         log.info("tiktok_export_ready", shop_id=self.shop.shop_id, file=new_label)
 
-        row = page.locator(f'text="{new_label}"').first
-        btn = row.locator("xpath=ancestor::tr[1]").locator(SEL["download_btn"][0]).first
-        if btn.count() == 0:
-            btn = page.locator(SEL["download_btn"][0]).first
+        btn = self._row_download_button(page, new_label)
         return self._capture_download(page, btn.click, timeout_ms=120_000)
+
+    def _try_row_download_button(self, page, label: str):
+        """หาปุ่มดาวน์โหลด "ของแถวนั้น" โดยไต่ขึ้นจากชื่อไฟล์ทีละชั้น — ไม่เจอคืน None
+
+        แถวประวัติเป็น <div> ไม่ใช่ <tr> (โค้ดเดิมหา ancestor::tr แล้วไม่เจอ)
+        เงื่อนไข count == 1 คือตัวบอกว่าไต่มาถึงระดับ "แถว" พอดี —
+        ถ้าไต่สูงเกินไปจะเจอปุ่มของทุกแถวรวมกัน
+
+        แถวที่ยังสร้างไฟล์ไม่เสร็จจะเป็นปุ่ม "กำลังส่งออก" ยังไม่ใช่ "ดาวน์โหลด"
+        จึงคืน None ให้ผู้เรียกรอต่อ
+        """
+        node = page.locator(f'text="{label}"').first
+        if node.count() == 0:
+            return None
+        for _ in range(6):
+            node = node.locator("xpath=..")
+            for sel in SEL["download_btn"]:
+                btn = node.locator(sel)
+                if btn.count() == 1:
+                    return btn.first
+        return None
+
+    def _row_download_button(self, page, label: str):
+        btn = self._try_row_download_button(page, label)
+        if btn is None:
+            raise AdapterError(
+                ErrorType.PARSE_ERROR,
+                f'หาปุ่มดาวน์โหลดของแถว "{label}" ไม่เจอ — โครงสร้างประวัติเปลี่ยน',
+            )
+        return btn
 
     def _history_labels(self, page) -> set[str]:
         """ชื่อไฟล์ที่มีอยู่แล้วในประวัติ — ใช้เทียบว่าอันไหนคือของรอบนี้"""
@@ -130,7 +181,10 @@ class TiktokAdapter(PlaywrightAdapter):
             new = self._history_labels(page) - before
             if new:
                 label = sorted(new)[-1]
-                if page.locator(SEL["download_btn"][0]).count() > 0:
+                # ⚠️ ต้องเช็คปุ่ม "ของแถวใหม่" ไม่ใช่ปุ่มไหนก็ได้บนหน้า
+                # แถวเก่ามีปุ่มดาวน์โหลดอยู่แล้วเสมอ เช็คแบบรวม ๆ จะผ่านทันที
+                # ทั้งที่แถวใหม่ยังขึ้น "กำลังส่งออก" อยู่
+                if self._try_row_download_button(page, label) is not None:
                     return label
         raise AdapterError(
             ErrorType.TIMEOUT,

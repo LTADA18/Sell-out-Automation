@@ -30,7 +30,7 @@ shops:
 
   - shop_id: tiktok_02
     platform: tiktok
-    adapter: mock
+    adapter: playwright
     display_name: "toolsdee1"
     account_key: TIKTOK_02
     enabled: true
