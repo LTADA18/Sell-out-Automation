@@ -64,8 +64,12 @@ def _autofit(ws: Worksheet, max_width: int = 42) -> None:
         ws.column_dimensions[letter].width = min(max(widest + 2, 10), max_width)
 
 
-def _write_orders_sheet(wb: Workbook, orders: list[Order]) -> None:
-    ws = wb.create_sheet("Orders")
+def _day_of(order: Order) -> str:
+    return order.order_created_at.strftime("%Y-%m-%d") if order.order_created_at else NULL
+
+
+def _write_orders_sheet(wb: Workbook, orders: list[Order], title: str = "Orders") -> None:
+    ws = wb.create_sheet(title)
     ws.append(list(EXCEL_COLUMNS))
 
     for order in orders:
@@ -88,6 +92,24 @@ def _write_orders_sheet(wb: Workbook, orders: list[Order]) -> None:
     _autofit(ws)
 
 
+def _write_day_sheets(wb: Workbook, orders: list[Order]) -> list[str]:
+    """แตกชีทเพิ่ม 1 วัน = 1 ชีท ชื่อชีทเป็น YYYY-MM-DD
+
+    ทำเฉพาะตอนข้อมูลคร่อมหลายวัน (เช่น backfill / --from --to)
+    รอบรายวันปกติมีวันเดียว ชีท Orders ก็คือวันนั้นอยู่แล้ว แตกไปก็ซ้ำเปล่า ๆ
+    """
+    by_day: dict[str, list[Order]] = defaultdict(list)
+    for o in orders:
+        by_day[_day_of(o)].append(o)
+
+    if len(by_day) <= 1:
+        return []
+
+    for day in sorted(by_day):
+        _write_orders_sheet(wb, by_day[day], title=day)
+    return sorted(by_day)
+
+
 def _summarize(orders: list[Order]) -> tuple[list[list], dict]:
     """สรุปรายวัน — นับที่ระดับ 'ออเดอร์' ไม่ใช่ 'แถว'
 
@@ -95,8 +117,7 @@ def _summarize(orders: list[Order]) -> tuple[list[list], dict]:
     """
     by_day: dict[str, list[Order]] = defaultdict(list)
     for o in orders:
-        day = o.order_created_at.strftime("%Y-%m-%d") if o.order_created_at else NULL
-        by_day[day].append(o)
+        by_day[_day_of(o)].append(o)
 
     rows: list[list] = []
     # sale_orders นับแยกจาก orders เพราะ AOV ต้องหารด้วย "ออเดอร์ที่เป็นยอดขายจริง"
@@ -212,6 +233,7 @@ def export_shop(
     wb.remove(wb.active)                     # ตัด sheet เปล่าที่ openpyxl แถมมา
 
     _write_orders_sheet(wb, orders)
+    day_sheets = _write_day_sheets(wb, orders)
     _write_summary_sheet(wb, orders)
     _write_meta_sheet(wb, {
         "ร้าน": f"{shop_name} ({shop_id})",
@@ -220,6 +242,7 @@ def export_shop(
         "ช่วงข้อมูล": f"{date_from} ถึง {date_to}",
         "จำนวนแถว (order line)": len(orders),
         "จำนวนออเดอร์": len({o.order_id for o in orders}),
+        "ชีทรายวัน": ", ".join(day_sheets) if day_sheets else "ไม่มี (ข้อมูลวันเดียว)",
         "เวลาที่ดึง": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "สถานะ": status,
         "เวอร์ชันสคริปต์": SCRIPT_VERSION,

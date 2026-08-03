@@ -36,4 +36,14 @@ $code = $LASTEXITCODE
 
 $mins = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
 Write-Host "ใช้เวลา $mins นาที (exit $code)" -ForegroundColor Cyan
+
+# สร้าง Dashboard ทุกครั้ง — โดยเฉพาะรอบที่พังยิ่งต้องมี ไม่งั้นเช้ามาไม่รู้ว่าติดตรงไหน
+# ห้ามให้ขั้นนี้ทำให้ exit code ของรอบเพี้ยน: เก็บ $code ไว้ก่อนแล้วคืนค่าเดิมเสมอ
+try {
+    & $py -m src.cli dashboard | Out-Null
+    Write-Host "Dashboard: output\dashboard.html" -ForegroundColor Cyan
+} catch {
+    Write-Host "สร้าง Dashboard ไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
+}
+
 exit $code

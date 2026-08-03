@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sys
+import webbrowser
 from datetime import date, datetime, timedelta
 
 import click
 
 from src.adapters.registry import build_adapter
 from src.core.config import PROJECT_ROOT, load_config
+from src.core.dashboard import build as build_dashboard
 from src.core.logging_setup import setup_logging
 from src.core.runner import AlreadyRunningError, Runner, run_lock, summarize
 from src.core.status_store import StatusStore
@@ -163,11 +165,29 @@ def login(shop: str) -> None:
 
 
 @cli.command()
-def dashboard() -> None:
-    """เปิด Streamlit dashboard (Phase 2)"""
-    click.echo("❌ Dashboard ยังไม่พร้อมใน Phase 1 — จะทำใน Phase 2")
-    click.echo("   เมื่อพร้อมแล้วจะเปิดด้วย: streamlit run src/dashboard/app.py")
-    sys.exit(3)
+@click.option("--date", "run_date_s", help="วันที่ของรอบ (YYYY-MM-DD) ค่าเริ่มต้น=รอบล่าสุดใน db")
+@click.option("--days", default=14, show_default=True, help="จำนวนวันย้อนหลังในตารางความร้อน")
+@click.option("--open", "open_it", is_flag=True, help="เปิดในเบราว์เซอร์เลย")
+def dashboard(run_date_s: str | None, days: int, open_it: bool) -> None:
+    """สร้าง Dashboard สถานะการดึงเป็นไฟล์ HTML"""
+    cfg = load_config()
+    run_date = _parse(run_date_s, "--date")
+    out = PROJECT_ROOT / cfg.settings.paths.output_dir / "dashboard.html"
+
+    try:
+        path = build_dashboard(
+            PROJECT_ROOT / cfg.settings.paths.db_path,
+            out,
+            run_date.isoformat() if run_date else None,
+            days,
+        )
+    except FileNotFoundError as exc:
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"✅ {path}")
+    if open_it:
+        webbrowser.open(path.as_uri())
 
 
 if __name__ == "__main__":
