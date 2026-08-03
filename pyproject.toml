@@ -1,0 +1,12 @@
+[project]
+name = "order-pipeline"
+version = "0.1.0"
+description = "ดึงคำสั่งซื้อจากหลังบ้าน Shopee / Lazada / TikTok Shop 15 ร้าน ทุกวัน 06:00 น."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

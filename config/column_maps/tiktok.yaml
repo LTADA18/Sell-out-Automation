@@ -1,0 +1,137 @@
+# ─────────────────────────────────────────────────────────────
+#  TikTok Shop — ไฟล์ Export จาก คำสั่งซื้อ  (65 คอลัมน์)
+#  อ้างอิงจากไฟล์จริง: "ทั้งหมด คำสั่งซื้อ-2026-08-03-13_16.xlsx"
+# ─────────────────────────────────────────────────────────────
+
+# ── ขั้นตอนกดปุ่ม Export (Phase 3) ───────────────────────────
+export_flow:
+  # ส่งช่วงวันที่ผ่าน URL ได้ตรง ๆ ไม่ต้องคลิกปฏิทิน (เสถียรกว่ามาก)
+  # ค่าเป็น epoch มิลลิวินาที เวลาไทย — ตรวจแล้วกับของจริง:
+  #   1785517200000 = 2026-08-01 00:00:00.000 +07
+  #   1785689999999 = 2026-08-02 23:59:59.999 +07
+  order_list_url: "{base}/order?selected_sort=6&tab=all&time_order_created[]={start_ms}&time_order_created[]={end_ms}"
+  date_param_unit: epoch_ms
+  timezone: Asia/Bangkok
+
+  # ⚠️ ถ้า URL ไม่มี time_order_created ครบทั้งคู่ TikTok จะ default เป็น
+  #    "12 เดือนย้อนหลัง" → ดึงทั้งปีทุกเช้า × 5 ร้าน
+  #    adapter ต้อง assert ว่ามีครบก่อนกดส่งออก ห้ามข้ามขั้นนี้
+  require_date_params: true
+
+  export_format: Excel        # หน้ามีให้เลือก CSV / Excel
+
+  # ต่างจาก Lazada: กดแล้วไฟล์ไม่มาทันที เข้าคิวใน "ประวัติการส่งออก" ก่อน
+  # แถวบนสุดจะเป็นสปินเนอร์จนกว่าจะสร้างเสร็จ แล้วค่อยกลายเป็นปุ่ม "ดาวน์โหลด"
+  async_export: true
+  poll_history_panel: true
+  history_retention_days: 7
+  # ชื่อไฟล์มีเวลาในตัว: "ทั้งหมด คำสั่งซื้อ-2026-08-03-16:36.xlsx"
+  # → ใช้ยืนยันว่าได้ไฟล์ของรอบนี้จริง ไม่ใช่ไฟล์เก่าที่ค้างในประวัติ
+  filename_has_timestamp: true
+
+file:
+  sheet: OrderSKUList
+  header_row: 1
+  # ⚠️ แถวที่ 2 เป็นคำอธิบายคอลัมน์ ("Platform unique order ID.") ไม่ใช่ข้อมูล
+  #    ถ้าไม่ข้าม จะได้ออเดอร์ผีเพิ่มมา 1 แถวทุกไฟล์
+  data_start_row: 3
+
+datetime_format: "%d/%m/%Y %H:%M:%S"   # "31/07/2026 23:55:52" — วัน/เดือน/ปี
+
+fields:
+  order_id:          ["Order ID"]
+  order_created_at:  ["Created Time"]
+  paid_at:           ["Paid Time"]
+  shipped_at:        ["Shipped Time"]
+  delivered_at:      ["Delivered Time"]
+  cancelled_at:      ["Cancelled Time"]
+  status_raw:        ["Order Status"]
+  status_sub:        ["Order Substatus"]
+  payment_method:    ["Payment Method"]
+  sku:               ["Seller SKU"]
+  platform_sku_id:   ["SKU ID"]
+  product_name:      ["Product Name"]
+  variation:         ["Variation"]
+  quantity:          ["Quantity"]
+  return_quantity:   ["Sku Quantity of return"]
+  item_price:        ["SKU Unit Original Price"]
+  item_subtotal:     ["SKU Subtotal After Discount"]
+  seller_discount:   ["SKU Seller Discount"]
+  platform_discount: ["SKU Platform Discount"]
+  shipping_fee:      ["Shipping Fee After Discount"]
+  shipping_fee_orig: ["Original Shipping Fee"]
+  total_amount:      ["Order Amount"]
+  refund_amount:     ["Order Refund Amount"]
+  shipping_carrier:  ["Shipping Provider Name"]
+  tracking_no:       ["Tracking ID"]
+  buyer_username:    ["Buyer Username"]
+  province:          ["Province"]           # ไม่ถูก mask ใช้ได้เลย
+  cancel_reason:     ["Cancel Reason"]
+  cancel_by:         ["Cancel By"]
+  product_category:  ["Product Category"]
+  order_channel:     ["Order Channel"]
+  seller_note:       ["Seller Note"]
+
+# ค่าดิบเป็นภาษาไทย (ตามภาษาที่ตั้งในหลังบ้าน — สลับเป็น EN ต้องเพิ่มคีย์)
+#
+# ⚠️ adapter อ่าน "Order Substatus" ก่อน แล้วค่อยถอยไป "Order Status"
+#    เพราะคอลัมน์หลักหยาบเกินไป: 'จัดส่งแล้ว' รวมทั้งของที่ถึงมือลูกค้าแล้ว
+#    และของที่ยังอยู่บนรถ ทำให้แยก DELIVERED กับ SHIPPED ไม่ออก
+#    (ยืนยันจากไฟล์จริง: จัดส่งแล้ว 35 = จัดส่งสำเร็จ 24 + อยู่ระหว่างขนส่ง 11)
+status_map:
+  # ── ค่าจาก Order Substatus (ละเอียดกว่า ใช้ก่อน) ──
+  "รอเข้ารับ":        READY_TO_SHIP
+  "รอจัดส่ง":         READY_TO_SHIP
+  "อยู่ระหว่างขนส่ง":  SHIPPED
+  "จัดส่งสำเร็จ":      DELIVERED
+  "ค้างชำระ":         PENDING
+
+  # ── ค่าจาก Order Status (ใช้เมื่อ substatus ว่าง) ──
+  "ที่จะจัดส่ง":       READY_TO_SHIP
+  "จัดส่งแล้ว":        SHIPPED
+  "ยกเลิกแล้ว":        CANCELLED
+  "รอชำระเงิน":       PENDING
+  "รอการจัดส่ง":      READY_TO_SHIP
+  "เสร็จสมบูรณ์":      DELIVERED
+  "คืนสินค้า/คืนเงิน":  RETURNED
+
+  # ── เผื่อสลับหลังบ้านเป็นภาษาอังกฤษ ──
+  unpaid:            PENDING
+  awaiting_shipment: READY_TO_SHIP
+  awaiting_collection: READY_TO_SHIP
+  in_transit:        SHIPPED
+  delivered:         DELIVERED
+  completed:         DELIVERED
+  cancelled:         CANCELLED
+
+pii_columns:
+  - Recipient
+  - "Phone #"
+  - Zipcode
+  - "Detail Address"
+  - "Additional address information"
+  - District
+  - Districts
+  - "Buyer Message"
+  - "Tax Info - Buyer Tax ID"
+  - "Tax Info - Full Name of Buyer"
+  - "Tax Info - Email"
+  - "Tax Info - Phone Number"
+  - "Tax Info - Registered Address"
+
+quirks:
+  # แถวคำอธิบายที่ row 2 (ดู data_start_row)
+  has_description_row: true
+
+  # มี quantity ให้ตรง ๆ (ต่างจาก Lazada ที่ต้องยุบแถวเอง)
+  has_quantity_column: true
+
+  # Order Amount เป็นค่าระดับ "ออเดอร์" แต่ซ้ำอยู่ทุกแถวของออเดอร์เดียวกัน
+  # → ตอนรวมยอดต้องนับครั้งเดียวต่อ Order ID ไม่งั้นบวกซ้ำตามจำนวน SKU
+  order_amount_is_order_level: true
+
+  # จังหวัด/อำเภอ ไม่ถูก mask แต่ ชื่อ/เบอร์/รหัสไปรษณีย์/ที่อยู่ ถูก mask มาแล้วบางส่วน
+  province_available: true
+
+  # ไม่มีค่าคอมมิชชั่น/ค่าธรรมเนียม/settlement — อยู่ในเมนู การเงิน (Phase 5)
+  no_fee_columns: true

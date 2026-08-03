@@ -1,0 +1,125 @@
+# ─────────────────────────────────────────────────────────────
+#  Lazada — ไฟล์ Export จาก คำสั่งซื้อ > ส่งออก  (77 คอลัมน์)
+#  อ้างอิงจากไฟล์จริง: eedaffd7defd7284bb1d33a3295c5950.xlsx (2026-08-03)
+#
+#  วันไหนหลังบ้านเปลี่ยนชื่อคอลัมน์ → แก้ไฟล์นี้ ไม่ต้องแตะโค้ด
+#  ค่าเป็น list = ลองไล่หาตามลำดับ เจอตัวไหนก่อนใช้ตัวนั้น
+# ─────────────────────────────────────────────────────────────
+
+# ── ขั้นตอนกดปุ่ม Export (Phase 3) ───────────────────────────
+export_flow:
+  # หน้าคำสั่งซื้อแบบเก่า (oldVersion=1) — ปุ่ม "ส่งออก" อยู่ข้างจำนวนรายการ
+  order_list_url: "{base}/apps/order/list?oldVersion=1"
+
+  # ช่วงวันที่ต้องกรอกผ่าน UI: กด "กำหนดเอง" แล้วพิมพ์ลงช่อง
+  # (ต่างจาก TikTok ที่ส่งผ่าน URL ได้)
+  date_via_ui: true
+  date_input_format: "%Y-%m-%d %H:%M:%S"    # 2026-08-01 00:00:00 ถึง 2026-08-02 23:59:59
+
+  steps:
+    - 'คลิกปุ่มช่วงวันที่ "กำหนดเอง"'
+    - "กรอกวันเริ่ม/วันสิ้นสุด"
+    - 'คลิก "ส่งออก"'
+    - 'กล่อง Confirm Export → คลิก "ยืนยัน"'
+    - 'รอ modal "ข้อมูลการส่งออก" ขึ้น "งานวิ่งประสบความสำเร็จ!"'
+    - 'ไฟล์เด้งดาวน์โหลดเอง (สำรอง: คลิก "ดาวน์โหลดไฟล์")'
+
+  # ได้ลิงก์ทันทีในไม่กี่วินาที ไม่ต้อง poll เหมือน TikTok
+  async_export: false
+  typical_wait_sec: 10
+
+  # ชื่อไฟล์เป็น hash สุ่ม เช่น eedaffd7defd7284bb1d33a3295c5950.xlsx
+  # → ต้องดักที่ download event ของ Playwright ห้ามเดาชื่อไฟล์
+  filename_is_random_hash: true
+
+file:
+  sheet: sheet1
+  header_row: 1
+  data_start_row: 2
+
+datetime_format: "%d %b %Y %H:%M"     # "02 Aug 2026 22:50" — เดือนย่อภาษาอังกฤษ ไม่มีวินาที
+
+fields:
+  order_id:          [orderNumber]
+  order_line_id:     [orderItemId]
+  order_created_at:  [createTime]
+  order_updated_at:  [updateTime]
+  status_raw:        [status]
+  payment_method:    [payMethod]
+  sku:               [sellerSku]
+  product_name:      [itemName]
+  variation:         [variation]
+  item_price:        [unitPrice]
+  paid_price:        [paidPrice]
+  seller_discount:   [sellerDiscountTotal]
+  platform_discount: [platformDiscountTotal]
+  shipping_fee:      [shippingFee]
+  shipping_carrier:  [shippingProvider]
+  tracking_no:       [trackingCode]
+  postcode:          [shippingPostCode]      # ใช้แปลงเป็นจังหวัด (ดู quirks ข้างล่าง)
+  cancel_reason:     []                      # ไฟล์ Export ไม่มีคอลัมน์นี้
+  return_status:     [refundAmount]
+  seller_note:       [sellerNote]
+
+# ค่าดิบ -> สถานะกลาง (ค่าดิบยังถูกเก็บไว้ที่ status_raw เสมอ)
+status_map:
+  unpaid:      PENDING
+  pending:     PENDING
+  confirmed:   PENDING          # เจอในไฟล์จริง 2026-08-03 (ยืนยันออเดอร์แล้วแต่ยังไม่แพ็ก)
+  packed:      READY_TO_SHIP
+  ready_to_ship: READY_TO_SHIP
+  shipped:     SHIPPED
+  delivered:   DELIVERED
+  canceled:    CANCELLED
+  cancelled:   CANCELLED
+  returned:    RETURNED
+  failed:      CANCELLED
+
+# ── คอลัมน์ที่ต้องทิ้งเสมอเมื่อ include_pii=false ────────────
+pii_columns:
+  - customerName            # ⚠️ บางแถวไม่ถูก mask — โผล่ชื่อ-นามสกุลเต็ม
+  - customerEmail
+  - nationalRegistrationNumber   # ⚠️ เลขบัตรประชาชน
+  - shippingName
+  - shippingAddress
+  - shippingAddress2
+  - shippingAddress3
+  - shippingAddress4
+  - shippingAddress5
+  - shippingPhone
+  - shippingPhone2
+  - billingName
+  - billingAddr
+  - billingAddr2
+  - billingAddr3
+  - billingAddr4
+  - billingAddr5
+  - billingPhone
+  - billingPhone2
+  - taxCode
+
+# ── ข้อควรระวังของไฟล์นี้ (อ่านก่อนแก้ adapter) ──────────────
+quirks:
+  # 1) ไม่มีคอลัมน์ quantity เลย — Lazada ออก 1 แถวต่อ "1 ชิ้น"
+  #    ออเดอร์ที่ซื้อสินค้าเดียวกัน 3 ชิ้น = 3 แถว orderItemId ต่างกัน orderNumber เดียวกัน
+  #    → adapter ต้องยุบแถวเอง: group by (orderNumber, sellerSku) แล้วนับเป็น quantity
+  #    ถ้าไม่ยุบ ยอด "จำนวนออเดอร์" จะเป๊ะ แต่ "จำนวนชิ้น" จะถูกนับเป็น 1 ตลอด
+  no_quantity_column: true
+  quantity_from: [orderNumber, sellerSku]
+
+  # 2) orderItemId != orderNumber — ต่างกันจริง ไม่ใช่พิมพ์ผิด
+  #    ตัวอย่าง: orderItemId 1118857733089544 / orderNumber 1118857732989544
+  #    ใช้ orderNumber เป็น order_id เพราะเป็นเลขที่ลูกค้าและ CS อ้างถึง
+  distinct_item_and_order_id: true
+
+  # 3) shippingCity ถูก mask เป็น "เ*n" ใช้ไม่ได้ แต่ shippingPostCode ไม่ถูก mask
+  #    → แปลงรหัสไปรษณีย์เป็นจังหวัดแทน (ตาราง data/th_postcode.csv)
+  province_from_postcode: true
+
+  # 4) ไม่มีค่าคอมมิชชั่น / ค่าธรรมเนียม / ยอด settlement ในรายงานนี้
+  #    อยู่คนละที่: การเงิน > รายงานการชำระเงิน (Phase 5)
+  no_fee_columns: true
+
+  # 5) ไฟล์ไม่ประกาศ dimension → openpyxl read_only เห็นแค่ 1 คอลัมน์
+  #    ต้องเรียก ws.reset_dimensions() ก่อนอ่าน ไม่งั้นได้ข้อมูลไม่ครบ
+  needs_reset_dimensions: true

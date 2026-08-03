@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────
+#  ร้านที่มีอยู่จริงตอนนี้: Lazada 1 + TikTok 5 = 6 ร้าน
+#  (Shopee ยังไม่มีร้าน — เพิ่มทีหลังได้ ดูตัวอย่างท้ายไฟล์)
+#
+#  ⚠️ ห้ามใส่รหัสผ่านในไฟล์นี้เด็ดขาด ไฟล์นี้ถูก commit ขึ้น git
+#     อีเมลที่ใช้ล็อกอินอยู่ใน .env (ไม่ถูก commit) อ้างผ่าน account_key
+#
+#  platform : แพลตฟอร์มจริง (ใช้ตั้งชื่อไฟล์ + rate limit + column map)
+#  adapter  : mock = ข้อมูลปลอม | playwright = กดปุ่ม Export จริง | api = Official API
+#             → เปลี่ยนบรรทัดนี้บรรทัดเดียวเพื่อสลับวิธีดึง ไม่ต้องแตะโค้ด
+#  enabled  : false = ข้ามร้านนี้ ขึ้น SKIPPED (⚪ เทา) ไม่ใช่ FAILED (🔴 แดง)
+# ─────────────────────────────────────────────────────────────
+
+shops:
+  # ── Lazada ────────────────────────────────────────────────
+  - shop_id: lazada_01
+    platform: lazada
+    adapter: mock
+    display_name: "กัปตัน เอกสตีล"
+    account_key: LAZADA_01
+    enabled: true
+
+  # ── TikTok Shop ───────────────────────────────────────────
+  - shop_id: tiktok_01
+    platform: tiktok
+    adapter: mock
+    display_name: "powerstool"
+    account_key: TIKTOK_01
+    enabled: true
+
+  - shop_id: tiktok_02
+    platform: tiktok
+    adapter: mock
+    display_name: "toolsdee1"
+    account_key: TIKTOK_02
+    enabled: true
+
+  - shop_id: tiktok_03
+    platform: tiktok
+    adapter: mock
+    display_name: "ฝ้ายการช่าง"
+    account_key: TIKTOK_03
+    enabled: true
+
+  - shop_id: tiktok_04
+    platform: tiktok
+    adapter: mock
+    display_name: "100อัน1000อย่าง88"
+    account_key: TIKTOK_04
+    enabled: true
+
+  - shop_id: tiktok_05
+    platform: tiktok
+    adapter: mock
+    display_name: "เฮียเก๋าเครื่องมือช่าง ราคาถูก"
+    account_key: TIKTOK_05
+    enabled: true
+
+  # ── Shopee: ยังไม่มีร้าน ──────────────────────────────────
+  # เมื่อเปิดร้านแล้วให้ลอกบล็อกนี้มาใช้:
+  #
+  # - shop_id: shopee_01
+  #   platform: shopee
+  #   adapter: mock
+  #   display_name: "ชื่อร้าน"
+  #   account_key: SHOPEE_01
+  #   enabled: true

@@ -1,0 +1,42 @@
+timezone: Asia/Bangkok
+
+fetch:
+  # ดึงย้อนหลังกี่วันนับจากเมื่อวาน — 1 = วันต่อวัน (ค่าที่เลือกไว้)
+  lookback_days: 1
+
+  # ไล่อัปเดตสถานะของไฟล์ย้อนหลังกี่วัน (0 = ปิด)
+  # เปิดเป็น 7 เมื่อไหร่ = ไฟล์เก่าจะถูกดึงซ้ำเพื่ออัปเดตออเดอร์ที่ถูกยกเลิก/คืนสินค้าภายหลัง
+  # และเก็บ settlement_amount ที่ยังไม่มาในวันแรก
+  refresh_status_days: 0
+
+privacy:
+  # false = ตัดชื่อ-นามสกุล/เบอร์/ที่อยู่ทิ้งก่อนเขียน Excel, mask buyer_username, เก็บแค่จังหวัด
+  # ไฟล์ดิบใน data/raw/ ยังเก็บของเดิมไว้ debug (อยู่ใน .gitignore)
+  include_pii: false
+
+retry:
+  # หน่วงแบบ exponential — ใช้เฉพาะ error ที่ retry ได้ (NETWORK / RATE_LIMITED / TIMEOUT / 5xx)
+  # AUTH_EXPIRED ห้าม retry: ยิงซ้ำก็ไม่ผ่าน มีแต่เสี่ยงโดนล็อกบัญชี
+  backoff_seconds: [2, 8, 30]
+
+rate_limit:
+  # หน่วงระหว่างร้าน (วินาที) สุ่มในช่วงนี้ — กฎเหล็กของ pdp-scraper: ห้ามต่ำกว่า 3 วิ
+  delay_between_shops: [3, 7]
+
+  # เพดานเวลาต่อ 1 ร้าน (วินาที) — Export ของหลังบ้านใช้เวลา generate เป็นนาที
+  # เกินนี้ = TIMEOUT แล้วไปร้านถัดไป ไม่ปล่อยให้ค้างทั้งรอบ
+  shop_timeout_sec: 600
+
+schedule:
+  hour: 6
+  minute: 0
+
+paths:
+  raw_dir: data/raw
+  profiles_dir: data/profiles
+  sessions_dir: data/sessions
+  output_dir: output
+  archive_dir: output/_archive
+  logs_dir: logs
+  db_path: data/status.db
+  lock_file: data/run.lock
