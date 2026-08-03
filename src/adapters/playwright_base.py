@@ -72,10 +72,21 @@ class PlaywrightAdapter(BaseAdapter):
 
     @property
     def has_session(self) -> bool:
-        # โปรไฟล์ที่ล็อกอินแล้วจะมีไฟล์ Cookies อยู่ข้างใน โฟลเดอร์เปล่าไม่นับ
-        return (self.profile_dir / "Default" / "Cookies").exists() or (
-            self.profile_dir / "Cookies"
-        ).exists()
+        """โปรไฟล์ที่ล็อกอินแล้วจะมีไฟล์ Cookies อยู่ข้างใน โฟลเดอร์เปล่าไม่นับ
+
+        ⚠️ Chrome ตั้งแต่ v96 ย้าย Cookies ไปไว้ใน Default/Network/
+        ตัวที่เจอจริงบนเครื่อง (Chrome 150) คือ Default/Network/Cookies
+        เหลือ path เก่าไว้เผื่อ Chromium รุ่นเก่า/ช่องทางอื่น
+        """
+        return any(
+            (self.profile_dir / p).exists()
+            for p in (
+                Path("Default") / "Network" / "Cookies",   # Chrome 96+
+                Path("Default") / "Cookies",               # เก่ากว่านั้น
+                Path("Network") / "Cookies",
+                Path("Cookies"),
+            )
+        )
 
     def download_dir(self, run_date: str) -> Path:
         d = PROJECT_ROOT / self.settings.paths.raw_dir / self.shop.platform / self.shop.shop_id / "files"
@@ -199,6 +210,9 @@ class PlaywrightAdapter(BaseAdapter):
         """เด้งหน้า login หรือหน้าไม่มีสิทธิ์ = หยุดร้านนี้ทันที ห้าม retry"""
         url = page.url.lower()
         if any(h in url for h in LOGIN_URL_HINTS):
+            # ถ่ายภาพก่อนโยน error — รอบ 06:00 ไม่มีใครนั่งดู ถ้าไม่เก็บไว้จะไล่สาเหตุไม่ได้
+            # ⚠️ ภาพมีอีเมลที่ใช้ล็อกอินติดมาด้วย แต่ logs/ อยู่ใน .gitignore แล้ว
+            self._screenshot_on_error(page, "auth_expired")
             raise AdapterError(
                 ErrorType.AUTH_EXPIRED,
                 f"cookie หมดอายุ (เด้งไปหน้า login) — รัน: "
@@ -206,6 +220,7 @@ class PlaywrightAdapter(BaseAdapter):
             )
         body = (page.inner_text("body")[:3000] if page.locator("body").count() else "").lower()
         if any(h.lower() in body for h in NO_PERMISSION_HINTS):
+            self._screenshot_on_error(page, "no_permission")
             raise AdapterError(
                 ErrorType.NO_PERMISSION,
                 "บัญชีที่ล็อกอินไม่มีสิทธิ์ดูคำสั่งซื้อ — ให้เจ้าของร้านเพิ่มสิทธิ์ 'จัดการคำสั่งซื้อ'",
