@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, datetime
 from pathlib import Path
@@ -193,8 +194,36 @@ class PlaywrightAdapter(BaseAdapter):
             self._context = self._pw.chromium.launch_persistent_context(**opts)
 
         self._context.set_default_timeout(60_000)
+        self._restore_session_cookies()
         pages = self._context.pages
         return pages[0] if pages else self._context.new_page()
+
+    def _restore_session_cookies(self) -> None:
+        """ยัด cookie จาก storage_state กลับเข้า context
+
+        ⚠️ จุดที่กัดแรงที่สุดของ Lazada: token ที่ใช้ยืนยันตัวตน
+        (lzd_sid / _tb_token_ / JSID / TID / CSRFT) เป็น **session cookie**
+        คือ expires = -1 ซึ่ง Chrome ทิ้งทิ้งทุกครั้งที่ปิดเบราว์เซอร์
+        โปรไฟล์ถาวรเก็บได้แค่ cookie ที่มีวันหมดอายุ (26 จาก 39 ตัว)
+        เปิดรอบใหม่จึงไม่มี token แล้วเด้งหน้า login ทั้งที่เพิ่งล็อกอินไป
+
+        storage_state ที่ _save_session() เขียนไว้เก็บครบทั้ง 39 ตัว
+        จึงต้องเอากลับมาใส่เองทุกครั้งที่เปิด context
+        """
+        if self._context is None or not self.session_file.exists():
+            return
+        try:
+            cookies = json.loads(self.session_file.read_text(encoding="utf-8")).get("cookies", [])
+            if not cookies:
+                return
+            self._context.add_cookies(cookies)
+            n_session = sum(1 for c in cookies if (c.get("expires") or -1) <= 0)
+            # ห้ามตั้งชื่อ field ว่ามีคำว่า "session"/"cookie" — logging_setup จะ mask เป็น ****
+            log.info("session_cookies_restored", shop_id=self.shop.shop_id,
+                     total=len(cookies), no_expiry=n_session)
+        except Exception as exc:                         # noqa: BLE001
+            # กู้ไม่ได้ก็ปล่อยผ่าน — เดี๋ยว _assert_logged_in จับเป็น AUTH_EXPIRED เอง
+            log.warning("restore_cookies_failed", shop_id=self.shop.shop_id, err=str(exc)[:150])
 
     def _save_session(self) -> None:
         """สำเนา cookie ออกมาไว้ debug — ตัวจริงถูกเก็บในโปรไฟล์อยู่แล้ว"""

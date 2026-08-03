@@ -19,11 +19,18 @@ log = get_logger()
 # selector หลายตัวต่อ 1 ปุ่ม — ไล่ลองจนกว่าจะเจอ
 # อิงข้อความ/role เป็นหลัก เพราะ class ของ Next design system เปลี่ยนบ่อย
 SEL = {
+    "all_tab": ['text="ทั้งหมด"'],
     "custom_range": ['text="กำหนดเอง"', 'text="Custom"'],
     "yesterday": ['text="เมื่อวานนี้"', 'text="Yesterday"'],
-    "date_input": ['input[placeholder="YYYY-MM-DD"]'],
+    "date_from": ['input[placeholder="วันที่เริ่มต้น"]', 'input[placeholder="Start date"]'],
+    "date_to": ['input[placeholder="วันที่สิ้นสุด"]', 'input[placeholder="End date"]'],
     "time_input": ['input[placeholder="HH:mm:ss"]'],
     "export_btn": ['button:has-text("ส่งออก")', 'button:has-text("Export")'],
+    # "Export All" เป็น li.next-menu-item — ไม่ใช่ role=menuitem (อันนั้นคือเมนูซ้ายของ Seller Center)
+    "export_all": ['li[class*="menu-item"]:has-text("Export All")',
+                   'li[class*="menu-item"]:has-text("ส่งออกทั้งหมด")',
+                   'text="Export All"',
+                   'text="ส่งออกทั้งหมด"'],
     "confirm_btn": ['button:has-text("ยืนยัน")', 'button:has-text("Confirm")', 'button:has-text("OK")'],
     "download_link": ['text="ดาวน์โหลดไฟล์"', 'text="Download file"'],
 }
@@ -53,10 +60,20 @@ class LazadaAdapter(PlaywrightAdapter):
         page.wait_for_timeout(3000)                      # หน้านี้ render ช้า รอ widget ขึ้นครบ
         self._assert_logged_in(page)
 
+        # หน้าเปิดมาที่แท็บ "ที่ต้องจัดส่ง" ซึ่ง **ไม่มีตัวกรองวันที่**
+        # ต้องสลับไปแท็บ "ทั้งหมด" ก่อน ช่องวันที่เริ่มต้น/สิ้นสุดถึงจะโผล่
+        # (และได้ออเดอร์ทุกสถานะ ไม่ใช่เฉพาะที่รอจัดส่ง)
+        if _click_first(page, SEL["all_tab"], 8000):
+            page.wait_for_timeout(4000)
+        else:
+            log.warning("all_tab_not_found", shop_id=self.shop.shop_id)
+
         try:
             self._set_date_range(page, date_from, date_to)
             return self._do_export(page)
         except AdapterError:
+            # เดิมไม่ถ่ายภาพในเคสนี้ ทำให้ selector พังแล้วไล่สาเหตุไม่ได้เลย
+            self._screenshot_on_error(page, "export_failed")
             raise
         except Exception as exc:                         # noqa: BLE001
             self._screenshot_on_error(page, "export_failed")
@@ -76,22 +93,35 @@ class LazadaAdapter(PlaywrightAdapter):
             page.wait_for_timeout(2500)
             return
 
-        if not _click_first(page, SEL["custom_range"]):
-            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่มช่วงวันที่ "กำหนดเอง" ไม่เจอ')
+        # ช่องวันที่อยู่บนหน้าตรง ๆ ไม่ต้องกาง "กำหนดเอง" ก่อน
+        # (กดเผื่อไว้ถ้าเจอ — บางบัญชีตัวกรองยุบอยู่ ไม่เจอก็ไม่ใช่ error)
+        _click_first(page, SEL["custom_range"], 3000)
         page.wait_for_timeout(1200)
 
-        dates = page.locator(SEL["date_input"][0])
-        times = page.locator(SEL["time_input"][0])
-        if dates.count() < 2:
-            raise AdapterError(
-                ErrorType.PARSE_ERROR,
-                f"คาดว่าจะมีช่องวันที่ 2 ช่อง แต่เจอ {dates.count()} ช่อง — หน้าเว็บเปลี่ยนแล้ว",
-            )
+        fields = []
+        for key in ("date_from", "date_to"):
+            loc = None
+            for sel in SEL[key]:
+                cand = page.locator(sel).first
+                try:
+                    cand.wait_for(state="visible", timeout=5000)
+                    loc = cand
+                    break
+                except Exception:                        # noqa: BLE001
+                    continue
+            if loc is None:
+                raise AdapterError(
+                    ErrorType.PARSE_ERROR,
+                    f"หาช่องวันที่ ({key}) ไม่เจอ — ลองแล้ว {SEL[key]} "
+                    f"ดูภาพใน logs/screenshots/ แล้วแก้ SEL ใน adapters/lazada.py",
+                )
+            fields.append(loc)
 
-        for i, day in enumerate((date_from, date_to)):
-            dates.nth(i).fill(day.isoformat())
-            dates.nth(i).press("Enter")
-            page.wait_for_timeout(400)
+        times = page.locator(SEL["time_input"][0])
+        for i, (loc, day) in enumerate(zip(fields, (date_from, date_to))):
+            loc.fill(day.isoformat())
+            loc.press("Enter")
+            page.wait_for_timeout(600)
             if times.count() > i:
                 times.nth(i).fill("00:00:00" if i == 0 else "23:59:59")
                 times.nth(i).press("Enter")
@@ -109,15 +139,16 @@ class LazadaAdapter(PlaywrightAdapter):
         def trigger() -> None:
             if not _click_first(page, SEL["export_btn"]):
                 raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่ม "ส่งออก" ไม่เจอ')
+            page.wait_for_timeout(1500)
+            # ⚠️ ห้ามหยิบ [role="menuitem"] ตัวแรก — เมนูซ้ายของ Seller Center
+            # ก็เป็น role=menuitem เหมือนกัน ตัวแรกคือ "เครื่องมือที่ใช้บ่อย"
+            # ตัวที่ต้องการชื่อ "Export All" (อีกตัวคือ "Export History" = ประวัติ)
+            if not _click_first(page, SEL["export_all"], 6000):
+                raise AdapterError(
+                    ErrorType.PARSE_ERROR,
+                    'กด "ส่งออก" แล้วไม่เจอเมนู "Export All" — หน้าเว็บอาจเปลี่ยน',
+                )
             page.wait_for_timeout(1200)
-            # ปุ่มเป็น next-menu-btn — บางครั้งกางเมนูก่อน ต้องเลือกรายการแรก
-            menu = page.locator('[role="menuitem"], li[class*="menu-item"]').first
-            try:
-                if menu.is_visible(timeout=2500):
-                    menu.click()
-                    page.wait_for_timeout(800)
-            except Exception:                            # noqa: BLE001
-                pass
             if not _click_first(page, SEL["confirm_btn"], 15000):
                 raise AdapterError(
                     ErrorType.PARSE_ERROR,
