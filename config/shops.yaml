@@ -15,7 +15,7 @@ shops:
   # ── Lazada ────────────────────────────────────────────────
   - shop_id: lazada_01
     platform: lazada
-    adapter: mock
+    adapter: playwright
     display_name: "กัปตัน เอกสตีล"
     account_key: LAZADA_01
     enabled: true
