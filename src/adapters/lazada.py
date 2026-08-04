@@ -33,6 +33,13 @@ SEL = {
                    'text="ส่งออกทั้งหมด"'],
     "confirm_btn": ['button:has-text("ยืนยัน")', 'button:has-text("Confirm")', 'button:has-text("OK")'],
     "download_link": ['text="ดาวน์โหลดไฟล์"', 'text="Download file"'],
+    # ปุ่มบนหน้า login — exact=True กันไปโดน "เข้าสู่ระบบด้วย OTP" ที่อยู่ใต้กันพอดี
+    "login_btn": ['button:text-is("เข้าสู่ระบบ")', 'button:text-is("Login")',
+                  'button:text-is("Sign in")'],
+    # ร่องรอย CAPTCHA / OTP ตระกูล Alibaba — เจอแล้วต้องหยุด ห้ามพยายามผ่าน
+    "challenge": ['#nc_1_wrapper', '.nc-container', "iframe[src*='punish']",
+                  "iframe[src*='captcha']", 'text=/เลื่อนเพื่อยืนยัน/',
+                  'text=/รหัส OTP/', 'text=/verification code/i'],
 }
 
 
@@ -58,7 +65,7 @@ class LazadaAdapter(PlaywrightAdapter):
         page.goto(url, wait_until="domcontentloaded")
         self.api_calls += 1
         page.wait_for_timeout(3000)                      # หน้านี้ render ช้า รอ widget ขึ้นครบ
-        self._assert_logged_in(page)
+        self._ensure_logged_in(page, url)                # หมดอายุแล้วต่อเองได้ (ดู auto_relogin)
 
         # หน้าเปิดมาที่แท็บ "ที่ต้องจัดส่ง" ซึ่ง **ไม่มีตัวกรองวันที่**
         # ต้องสลับไปแท็บ "ทั้งหมด" ก่อน ช่องวันที่เริ่มต้น/สิ้นสุดถึงจะโผล่
@@ -83,6 +90,59 @@ class LazadaAdapter(PlaywrightAdapter):
                 f"— ดูภาพหน้าจอใน logs/screenshots/ แล้วแก้ selector ใน adapters/lazada.py",
             ) from exc
 
+    # ── ต่ออายุ session เอง ─────────────────────────────────
+
+    def auto_relogin(self, page) -> bool:
+        """กดปุ่ม "เข้าสู่ระบบ" บนฟอร์มที่ Chrome เติมรหัสไว้ให้แล้ว
+
+        ⚠️ ระบบไม่เก็บ ไม่อ่าน ไม่พิมพ์รหัสผ่าน — Chrome ในโปรไฟล์ของร้านนี้
+        เป็นคนเติมช่องให้เอง (จากตอนที่คนล็อกอินด้วยมือครั้งแรก)
+        โค้ดทำแค่ 2 อย่าง: เช็คว่าช่องมีค่าอยู่ไหม (ดูความยาว ไม่ดูค่า) แล้วกดปุ่ม
+
+        เจอ CAPTCHA / OTP เมื่อไหร่ = หยุดทันที ไม่พยายามผ่าน (กฎเหล็กข้อ 5)
+        """
+        page.goto(f"{self.base_url}{self.login_path}", wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+
+        # ถ้าโดนเด้งไปหน้าสมัครสมาชิก แปลว่า Lazada ไม่รู้จักเครื่องนี้แล้ว
+        # หน้านั้นมีช่องรหัสผ่านของฟอร์มสมัคร (ว่าง) ถ้าไม่กันไว้จะเข้าใจผิดว่าเป็นฟอร์มล็อกอิน
+        if any(k in page.url.lower() for k in ("/register", "/signup")):
+            log.warning("relogin_landed_on_signup", shop_id=self.shop.shop_id, url=page.url[:120])
+            return False
+
+        # Chrome เติมรหัสให้ช้ากว่า domcontentloaded พอสมควร ต้อง poll ไม่ใช่รอเวลาตายตัว
+        filled = 0
+        for _ in range(10):
+            page.wait_for_timeout(1500)
+            filled = page.evaluate(
+                "() => { const p = document.querySelector('input[type=password]');"
+                " return p ? p.value.length : 0; }"
+            )
+            if filled:
+                break
+        if not filled:
+            log.warning("relogin_no_saved_password", shop_id=self.shop.shop_id)
+            return False
+        log.info("relogin_form_prefilled", shop_id=self.shop.shop_id, pw_len=filled)
+
+        if not _click_first(page, SEL["login_btn"], 8000):
+            log.warning("relogin_button_missing", shop_id=self.shop.shop_id)
+            return False
+
+        for _ in range(12):
+            page.wait_for_timeout(1500)
+            for sel in SEL["challenge"]:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=600):
+                        self._screenshot_on_error(page, "relogin_challenge")
+                        log.warning("relogin_challenge", shop_id=self.shop.shop_id, sel=sel)
+                        return False                     # ต้องให้คนมาทำเอง
+                except Exception:                        # noqa: BLE001
+                    continue
+            if "login" not in page.url.lower():
+                return True
+        return False
+
     # ── ตั้งช่วงวันที่ ───────────────────────────────────────
 
     def _set_date_range(self, page, date_from: date, date_to: date) -> None:
@@ -93,45 +153,86 @@ class LazadaAdapter(PlaywrightAdapter):
             page.wait_for_timeout(2500)
             return
 
-        # ช่องวันที่อยู่บนหน้าตรง ๆ ไม่ต้องกาง "กำหนดเอง" ก่อน
-        # (กดเผื่อไว้ถ้าเจอ — บางบัญชีตัวกรองยุบอยู่ ไม่เจอก็ไม่ใช่ error)
-        _click_first(page, SEL["custom_range"], 3000)
-        page.wait_for_timeout(1200)
+        # ⚠️ ช่องวันที่ **พิมพ์ไม่ได้** — เป็น <input disabled readonly role="combobox">
+        # ต้องกด "กำหนดเอง" เพื่อปลดล็อก แล้วเลือกวันจากปฏิทินที่กางออกมาเท่านั้น
+        # (โค้ดเดิมใช้ .fill() จึงค้างจน timeout — backfill พังมาตลอดโดยไม่มีใครรู้)
+        if not _click_first(page, SEL["custom_range"], 8000):
+            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่มช่วงวันที่ "กำหนดเอง" ไม่เจอ')
+        page.wait_for_timeout(1500)
 
-        fields = []
-        for key in ("date_from", "date_to"):
-            loc = None
-            for sel in SEL[key]:
-                cand = page.locator(sel).first
-                try:
-                    cand.wait_for(state="visible", timeout=5000)
-                    loc = cand
-                    break
-                except Exception:                        # noqa: BLE001
-                    continue
-            if loc is None:
-                raise AdapterError(
-                    ErrorType.PARSE_ERROR,
-                    f"หาช่องวันที่ ({key}) ไม่เจอ — ลองแล้ว {SEL[key]} "
-                    f"ดูภาพใน logs/screenshots/ แล้วแก้ SEL ใน adapters/lazada.py",
-                )
-            fields.append(loc)
-
-        times = page.locator(SEL["time_input"][0])
-        for i, (loc, day) in enumerate(zip(fields, (date_from, date_to))):
-            loc.fill(day.isoformat())
-            loc.press("Enter")
-            page.wait_for_timeout(600)
-            if times.count() > i:
-                times.nth(i).fill("00:00:00" if i == 0 else "23:59:59")
-                times.nth(i).press("Enter")
-                page.wait_for_timeout(400)
+        # เป็น range picker: เปิดปฏิทิน **ครั้งเดียว** จากช่องเริ่มต้น
+        # แล้วคลิก 2 วันติดกันในปฏิทินเดิม
+        # (เดิมไปคลิกช่อง "วันที่สิ้นสุด" เพื่อเปิดใหม่ ปฏิทินเลยปิดไปเฉย ๆ
+        #  แล้วค้างรอ actionability อยู่ 60 วินาทีก่อนพัง)
+        self._open_calendar(page, SEL["date_from"])
+        self._click_day(page, date_from)
+        self._click_day(page, date_to)
+        page.wait_for_timeout(3000)
 
         # ปฏิทินบางรุ่นต้องกด "ตกลง" ปิดก่อนตารางถึงจะ refresh
         _click_first(page, ['button:has-text("ตกลง")', 'button:has-text("OK")'], 3000)
         page.wait_for_timeout(3000)
         log.info("date_range_custom", shop_id=self.shop.shop_id,
                  date_from=date_from.isoformat(), date_to=date_to.isoformat())
+
+    def _open_calendar(self, page, input_sels: list[str]) -> None:
+        """คลิกช่องวันที่เพื่อกางปฏิทิน แล้วรอจนเห็นช่องวันจริง ๆ"""
+        for sel in input_sels:
+            loc = page.locator(sel).first
+            try:
+                loc.wait_for(state="visible", timeout=5000)
+                loc.click(timeout=8000)
+                page.wait_for_selector("td[title]:visible", timeout=8000)
+                return
+            except Exception:                            # noqa: BLE001
+                continue
+        raise AdapterError(
+            ErrorType.PARSE_ERROR,
+            f"กางปฏิทินไม่ได้ — ลองแล้ว {input_sels} ดูภาพใน logs/screenshots/",
+        )
+
+    def _click_day(self, page, target: date) -> None:
+        """คลิก 1 วันในปฏิทินที่กางอยู่ — ช่องวันมี title="YYYY-MM-DD" ให้เล็งได้ตรง ๆ
+
+        ปฏิทินโชว์ทีละ 2 เดือน ถ้าวันที่ต้องการไม่อยู่ในหน้าจอต้องกดลูกศรเลื่อนก่อน
+        """
+        want = target.isoformat()
+        # ⚠️ ต้องมี :visible — ปฏิทินของช่อง "วันที่เริ่มต้น" ที่ปิดไปแล้วยังอยู่ใน DOM
+        # ถ้าใช้ .first เฉย ๆ จะไปโดนช่องในปฏิทินที่ซ่อนอยู่ แล้วกดไม่ติด
+        cell = page.locator(f'td[title="{want}"]:visible')
+        for _ in range(24):                              # เผื่อย้อนหลังได้ ~2 ปี
+            if cell.count():
+                cell.first.click()
+                page.wait_for_timeout(1200)
+                log.info("date_picked", shop_id=self.shop.shop_id, date=want)
+                return
+
+            shown = self._first_shown_date(page)
+            arrow = "prev-month" if shown is None or want < shown else "next-month"
+            nav = page.locator(f'[class*="{arrow}"]:visible').first
+            try:
+                log.info("calendar_nav", shop_id=self.shop.shop_id,
+                         want=want, shown=shown, arrow=arrow)
+                nav.click(timeout=4000)
+            except Exception as exc:                     # noqa: BLE001
+                raise AdapterError(
+                    ErrorType.PARSE_ERROR,
+                    f"เลื่อนปฏิทินไปหา {want} ไม่ได้ (ปุ่ม {arrow}: {type(exc).__name__})",
+                ) from exc
+            page.wait_for_timeout(900)
+
+        raise AdapterError(
+            ErrorType.PARSE_ERROR,
+            f"หาวันที่ {want} ในปฏิทินไม่เจอ หลังเลื่อน 24 ครั้ง",
+        )
+
+    @staticmethod
+    def _first_shown_date(page) -> str | None:
+        """วันแรกสุดที่ปฏิทินกำลังแสดง — ใช้ตัดสินว่าจะเลื่อนไปหน้าหรือหลัง"""
+        try:
+            return page.locator("td[title]:visible").first.get_attribute("title")
+        except Exception:                                # noqa: BLE001
+            return None
 
     # ── กด Export แล้วดักไฟล์ ────────────────────────────────
 

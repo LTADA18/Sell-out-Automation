@@ -39,6 +39,8 @@ def cli() -> None:
 @click.option("--date", "run_date_s", help="วันที่ของรอบ (YYYY-MM-DD) ค่าเริ่มต้น=วันนี้")
 @click.option("--from", "date_from_s", help="ใช้คู่กับ --to เพื่อระบุช่วงเอง")
 @click.option("--to", "date_to_s", help="ใช้คู่กับ --from")
+@click.option("--skip-if-done", is_flag=True,
+              help="ถ้ารอบของวันนี้สำเร็จไปแล้วให้ออกทันที (ใช้กับ trigger ตอนเปิดเครื่อง)")
 def run(
     all_shops: bool,
     shop: str | None,
@@ -46,6 +48,7 @@ def run(
     run_date_s: str | None,
     date_from_s: str | None,
     date_to_s: str | None,
+    skip_if_done: bool,
 ) -> None:
     """ดึงข้อมูลแล้วออก Excel"""
     if not any([all_shops, shop, platform]):
@@ -69,6 +72,11 @@ def run(
     setup_logging(PROJECT_ROOT / cfg.settings.paths.logs_dir, run_id_hint)
 
     with StatusStore(PROJECT_ROOT / cfg.settings.paths.db_path) as store:
+        # trigger ตอนเปิดเครื่องจะยิงคำสั่งนี้ซ้ำ ถ้ารอบตี 6 วิ่งไปแล้วก็ไม่ต้องทำอีก
+        if skip_if_done and store.has_successful_run(run_date.isoformat()):
+            click.echo(f"ข้าม — รอบของ {run_date.isoformat()} สำเร็จไปแล้ว")
+            sys.exit(0)
+
         stale = store.mark_stale_running()
         if stale:
             click.echo(f"⚠️  เจอแถวค้างสถานะ RUNNING {stale} แถว จากรอบก่อนที่ไม่จบ — ปรับเป็น FAILED แล้ว")

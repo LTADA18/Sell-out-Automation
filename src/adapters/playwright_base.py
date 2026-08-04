@@ -22,7 +22,11 @@ from src.core.models import AdapterError, ErrorType, Order
 log = get_logger()
 
 # ร่องรอยบนหน้าเว็บที่แปลว่า session ใช้ไม่ได้แล้ว
-LOGIN_URL_HINTS = ("/login", "/account/login", "/apps/seller/login", "signin")
+# ⚠️ "register" ต้องมีด้วย — Lazada เด้งไป /apps/register/index ตอน session ตาย
+# ซึ่งไม่มีคำว่า login เลย เคยทำให้ _assert_logged_in บอกว่า "ล็อกอินอยู่"
+# แล้วเดินหน้าไปกด Export บนหน้าสมัครสมาชิก
+LOGIN_URL_HINTS = ("/login", "/account/login", "/apps/seller/login", "signin",
+                   "/register", "/signup")
 NO_PERMISSION_HINTS = ("ไม่มีสิทธิ์", "no permission", "not authorized", "ไม่ได้ขออนุญาต")
 
 
@@ -234,6 +238,42 @@ class PlaywrightAdapter(BaseAdapter):
             self._context.storage_state(path=str(self.session_file))
         except Exception as exc:                         # noqa: BLE001
             log.warning("save_session_failed", shop_id=self.shop.shop_id, err=str(exc))
+
+    # ── ต่ออายุ session เองตอนรอบอัตโนมัติ ──────────────────
+
+    def auto_relogin(self, page) -> bool:
+        """คลาสลูกที่ทำได้ให้ override — คืน True ถ้าล็อกอินใหม่สำเร็จ
+
+        ค่าเริ่มต้นคือทำไม่ได้ ให้เด้ง AUTH_EXPIRED ไปตามปกติ
+        """
+        return False
+
+    def _ensure_logged_in(self, page, back_to: str) -> None:
+        """เช็ค login — ถ้าหมดอายุลองต่ออายุเองรอบเดียวแล้วกลับมาหน้าเดิม
+
+        จำเป็นสำหรับรอบตี 6: session ของ Lazada อยู่ได้ ~85 นาที
+        ตอนตีหกไม่มีใครนั่งกดปุ่มให้ ถ้าไม่ต่ออายุเองรอบนั้นพังทุกวัน
+        """
+        try:
+            self._assert_logged_in(page)
+            return
+        except AdapterError as exc:
+            if exc.error_type is not ErrorType.AUTH_EXPIRED:
+                raise                                    # NO_PERMISSION ต่ออายุยังไงก็ไม่ช่วย
+            log.info("session_expired_trying_relogin", shop_id=self.shop.shop_id)
+
+        if not self.auto_relogin(page):
+            raise AdapterError(
+                ErrorType.AUTH_EXPIRED,
+                f"session หมดอายุและต่ออายุเองไม่ได้ — รัน: "
+                f"python -m src.cli login --shop {self.shop.shop_id}",
+            )
+
+        page.goto(back_to, wait_until="domcontentloaded")
+        page.wait_for_timeout(4000)
+        self._assert_logged_in(page)
+        self._save_session()                             # เก็บ token ชุดใหม่ทันที
+        log.info("relogin_ok", shop_id=self.shop.shop_id)
 
     def _assert_logged_in(self, page) -> None:
         """เด้งหน้า login หรือหน้าไม่มีสิทธิ์ = หยุดร้านนี้ทันที ห้าม retry"""

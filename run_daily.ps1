@@ -10,7 +10,8 @@
 param(
     [string]$Shop,
     [string]$Platform,
-    [string]$Date
+    [string]$Date,
+    [switch]$SkipIfDone
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,7 @@ if     ($Shop)     { $cliArgs += @("--shop", $Shop) }
 elseif ($Platform) { $cliArgs += @("--platform", $Platform) }
 else               { $cliArgs += "--all" }
 if ($Date) { $cliArgs += @("--date", $Date) }
+if ($SkipIfDone) { $cliArgs += "--skip-if-done" }
 
 $started = Get-Date
 Write-Host "เริ่มรอบ $($started.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
