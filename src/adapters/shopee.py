@@ -99,15 +99,46 @@ class ShopeeAdapter(PlaywrightAdapter):
                 f"— ดูภาพหน้าจอใน logs/screenshots/",
             ) from exc
 
+    def _current_shop_name(self, page) -> str | None:
+        """ชื่อร้านที่กำลังเปิดอยู่ (มุมขวาบนของ Seller Centre)"""
+        for sel in (".shop-name", "[class*='shop-name']", "[class*='account-name']"):
+            try:
+                loc = page.locator(sel).first
+                if loc.count():
+                    txt = (loc.inner_text(timeout=2500) or "").strip()
+                    if txt:
+                        return txt.split("\n")[0].strip()
+            except Exception:                            # noqa: BLE001
+                continue
+        return None
+
     def _enter_shop(self, page) -> None:
-        """ถ้าโดนเด้งไปหน้าเลือกร้าน ให้กด "รายละเอียด" ของร้านที่ต้องการ
+        """เลือกร้านให้ตรงกับ web_shop_name — กด "รายละเอียด" ในแถวของร้านนั้น
 
         กดที่ชื่อร้านตรง ๆ ไม่ทำงาน — ไม่ใช่ลิงก์ ปุ่มเดียวในแถวคือ "รายละเอียด"
-        """
-        if "/portal/shop" not in page.url:
-            return
 
+        ⚠️ อันตรายที่ต้องกันให้ได้: โปรไฟล์ "จำร้านที่เลือกไว้ล่าสุด"
+           ร้านถัดไปที่ใช้บัญชีเดียวกันจะเข้าหน้าคำสั่งซื้อได้เลยโดยไม่เจอหน้าเลือกร้าน
+           = ดึงข้อมูลของร้านก่อนหน้ามาใส่ป้ายชื่อร้านนี้ โดยไม่มีอะไรเตือน
+           จึงต้องเช็คชื่อร้านที่เปิดอยู่ทุกครั้ง ถ้าไม่ตรงให้บังคับกลับไปหน้าเลือกร้าน
+        """
         want = self.shop.web_name
+
+        if "/portal/shop" not in page.url:
+            current = self._current_shop_name(page)
+            if current and current.lower() == want.lower():
+                return                                   # อยู่ถูกร้านแล้ว
+            log.info("shopee_wrong_shop_open", shop_id=self.shop.shop_id,
+                     current=current, want=want)
+            page.goto(f"{self.base_url}/portal/shop?next=%2Fportal%2Fsale%2Forder",
+                      wait_until="domcontentloaded")
+            page.wait_for_timeout(8000)
+            if "/portal/shop" not in page.url:
+                raise AdapterError(
+                    ErrorType.PARSE_ERROR,
+                    f"บังคับกลับไปหน้าเลือกร้านไม่ได้ (อยู่ที่ {page.url[:80]}) "
+                    f"— เสี่ยงดึงข้อมูลผิดร้าน จึงหยุดไว้ก่อน",
+                )
         row = page.locator(f'tr:has-text("{want}")').first
         if row.count() == 0:
             names = []
