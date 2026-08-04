@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 from src.core.models import RunStatus
@@ -132,6 +132,76 @@ def collect_attachments(output_dir: Path, run_date: str,
     if with_excel:
         files += sorted((output_dir / run_date).glob("*.xlsx"))
     return files
+
+
+MARK = "[ดึงยอดขาย]"          # ใช้หาว่านัดหมายไหนเป็นของระบบนี้ ตอนลบ/สร้างใหม่
+
+
+def set_reminders(run_time: str, minutes: list[int]) -> list[str]:
+    """สร้างนัดหมายเตือนรายวันในปฏิทิน Outlook — คืนรายการหัวข้อที่สร้าง
+
+    ⚠️ ทำไมใช้ปฏิทินแทนการยิงแจ้งเตือนจากเครื่องนี้:
+       สิ่งที่ต้องเตือนคือ "เปิดเครื่อง" แปลว่าตอนต้องเตือน เครื่องนี้ปิดอยู่
+       อะไรที่รันบนเครื่องนี้จึงเตือนไม่ได้เลย
+       นัดหมายในปฏิทินถูก sync ขึ้น Microsoft 365 ตั้งแต่ตอนสร้าง
+       มือถือจะเตือนเองแม้โน้ตบุ๊กปิดสนิท
+
+    สร้างใหม่ทุกครั้ง (ลบของเดิมที่มี MARK ก่อน) เพื่อให้รันซ้ำได้ไม่เกิดนัดซ้อน
+    """
+    import win32com.client as win32
+
+    _ensure_outlook_running()
+    ns = win32.Dispatch("Outlook.Application").GetNamespace("MAPI")
+    cal = ns.GetDefaultFolder(9)                         # 9 = Calendar
+
+    # ลบของเดิมก่อน — วนจากท้ายเพราะการลบทำให้ index ขยับ
+    items = cal.Items
+    for i in range(items.Count, 0, -1):
+        try:
+            if MARK in (items.Item(i).Subject or ""):
+                items.Item(i).Delete()
+        except Exception:                                # noqa: BLE001
+            continue
+
+    hh, mm = (int(x) for x in run_time.split(":"))
+    created: list[str] = []
+    app = win32.Dispatch("Outlook.Application")
+
+    for m in sorted(minutes, reverse=True):
+        total = hh * 60 + mm - m
+        # ⚠️ ต้องส่งเป็น datetime object ไม่ใช่ string
+        #    Outlook ภาษาไทยแปลง string วันที่ไม่ได้ ("วัตถุไม่สนับสนุนวิธีการนี้")
+        #
+        # ใส่ .astimezone() ให้ชัดเจนว่าเป็นเวลาเครื่อง
+        # หมายเหตุตอนตรวจสอบ: pywin32 "อ่าน" ค่า .Start กลับมาเป็น UTC
+        # ถ้าดูค่าดิบจะเห็นเป็น 01:30 ทั้งที่ของจริงคือ 08:30 ตามเวลาไทย
+        # ต้อง .astimezone() ตอนอ่านด้วย ไม่งั้นจะเข้าใจผิดว่าเวลาเพี้ยน
+        start_dt = datetime.combine(date.today(), time(total // 60, total % 60)).astimezone()
+        subject = f"{MARK} อีก {m} นาที เปิดโน้ตบุ๊กให้ดึงยอดขาย {run_time}"
+
+        appt = app.CreateItem(1)                         # 1 = AppointmentItem
+        appt.Subject = subject
+        appt.Start = start_dt
+        appt.Duration = 5
+        appt.BusyStatus = 0                              # 0 = Free ไม่ให้ไปบังตารางงาน
+        appt.ReminderSet = True
+        appt.ReminderMinutesBeforeStart = 0
+        appt.Body = (
+            f"ระบบจะเริ่มดึงยอดขายอัตโนมัติเวลา {run_time} น.\n"
+            "ขอให้เครื่องเปิดอยู่ เสียบปลั๊ก และล็อกอิน Windows ค้างไว้ (จอล็อกได้)\n\n"
+            "ถ้าเปิดไม่ทัน ไม่เป็นไร — ระบบจะดึงให้เองตอนเปิดเครื่อง"
+        )
+
+        pattern = appt.GetRecurrencePattern()
+        pattern.RecurrenceType = 0                       # 0 = olRecursDaily
+        pattern.PatternStartDate = start_dt
+        pattern.StartTime = start_dt
+        pattern.NoEndDate = True
+
+        appt.Save()
+        created.append(f"{start_dt:%H:%M} — เตือนล่วงหน้า {m} นาที")
+
+    return created
 
 
 def _ensure_outlook_running(wait_sec: int = 40) -> bool:

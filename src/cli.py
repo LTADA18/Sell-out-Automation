@@ -174,6 +174,29 @@ def login(shop: str) -> None:
 
 
 @cli.command()
+@click.option("--at", "run_time", default="09:00", show_default=True,
+              help="เวลาที่ระบบจะเริ่มดึง (ต้องตรงกับ install_scheduler.ps1)")
+@click.option("--before", "before_s", default="30,15,5", show_default=True,
+              help="เตือนล่วงหน้ากี่นาที คั่นด้วย ,")
+def reminders(run_time: str, before_s: str) -> None:
+    """ตั้งเตือนในปฏิทิน Outlook ให้เปิดเครื่องก่อนถึงเวลาดึง
+
+    ใช้ปฏิทินเพราะมันถูก sync ขึ้น Microsoft 365 ตั้งแต่ตอนสร้าง
+    มือถือจึงเตือนได้เองแม้โน้ตบุ๊กจะปิดอยู่ ซึ่งเป็นสถานการณ์ที่ต้องเตือนพอดี
+    """
+    minutes = sorted({int(x) for x in before_s.split(",") if x.strip()}, reverse=True)
+    if not minutes:
+        raise click.BadParameter("--before ต้องมีอย่างน้อย 1 ค่า")
+
+    created = mailer.set_reminders(run_time, minutes)
+    click.echo(f"✅ ตั้งเตือนรายวันแล้ว {len(created)} รายการ (ลบของเดิมทิ้งก่อน)")
+    for line in created:
+        click.echo(f"   {line}")
+    click.echo("\n⚠️ จะเด้งบนมือถือได้ต้องลง Outlook แล้วล็อกอินบัญชีเดียวกัน")
+    click.echo("   ถ้ามีแต่บนโน้ตบุ๊ก จะเตือนไม่ได้ตอนเครื่องปิด ซึ่งคือตอนที่ต้องเตือนพอดี")
+
+
+@cli.command()
 @click.option("--to", "to_s", help="ผู้รับ คั่นด้วย , (ไม่ใส่ = ส่งหาตัวเองเพื่อทดสอบ)")
 @click.option("--cc", "cc_s", help="สำเนาถึง คั่นด้วย ,")
 @click.option("--date", "run_date_s", help="วันที่ของรอบ (YYYY-MM-DD) ค่าเริ่มต้น=รอบล่าสุดใน db")

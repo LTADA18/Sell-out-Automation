@@ -1,7 +1,7 @@
 ﻿# ติดตั้ง/ถอด Task Scheduler ให้รันรอบประจำวันอัตโนมัติ (Phase 4)
 #
-#   .\install_scheduler.ps1                  ติดตั้ง (ค่าเริ่มต้น 06:00)
-#   .\install_scheduler.ps1 -Time 05:30      เปลี่ยนเวลา
+#   .\install_scheduler.ps1                          ติดตั้ง (ดึง 09:00 / อีเมล 10:00)
+#   .\install_scheduler.ps1 -Time 05:30 -MailTime 07:00   เปลี่ยนเวลา
 #   .\install_scheduler.ps1 -Status          ดูสถานะ/รอบล่าสุด
 #   .\install_scheduler.ps1 -RunNow          สั่งรันเดี๋ยวนี้เพื่อทดสอบ
 #   .\install_scheduler.ps1 -Remove          ถอดออก
@@ -9,8 +9,11 @@
 # ต้องเปิด PowerShell แบบ Run as Administrator ตอนติดตั้ง/ถอด
 
 param(
-    [string]$Time = "06:00",
-    [string]$MailTime = "08:00",
+    # 09:00 ดึง / 10:00 ส่งอีเมล — เจ้าของงานเปิดโน้ตบุ๊กราว 8 โมง
+    # ตั้งหลังเวลานั้นเพื่อให้เครื่องตื่นอยู่แล้วจริง ๆ ไม่ต้องพึ่งการปลุก
+    # และเว้นห่าง 1 ชม. ให้รอบดึง (~15-20 นาที) จบแน่นอนก่อนถึงรอบอีเมล
+    [string]$Time = "09:00",
+    [string]$MailTime = "10:00",
     [switch]$Status,
     [switch]$RunNow,
     [switch]$Remove
