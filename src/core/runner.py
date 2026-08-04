@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import sys
 import time
 import traceback
 import uuid
@@ -33,21 +34,68 @@ class AlreadyRunningError(RuntimeError):
     pass
 
 
+def _pid_alive(pid: int) -> bool:
+    """เช็คว่าโปรเซสนี้ยังอยู่ไหม
+
+    ⚠️ ห้ามใช้ os.kill(pid, 0) บน Windows — Python จะเรียก TerminateProcess
+    คือ **ฆ่าโปรเซสนั้นทิ้งจริง ๆ** ไม่ใช่แค่เช็ค (ต่างจากบน Linux)
+    """
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True          # มีอยู่จริงแต่เราไม่มีสิทธิ์ส่งสัญญาณ
+
+
+def _lock_owner_pid(lock_path: Path) -> int:
+    try:
+        return int(lock_path.read_text(encoding="utf-8").split()[0])
+    except Exception:                                    # noqa: BLE001
+        return -1
+
+
 @contextmanager
 def run_lock(lock_path: Path) -> Iterator[None]:
     """กันรันซ้อน — รอบก่อนยังไม่จบ ห้ามเริ่มรอบใหม่
 
-    ถ้าเจอ lock ค้างจากโปรเซสที่ตายไปแล้ว (เก่าเกิน 6 ชม.) ให้ยึดคืน
-    ไม่งั้นเครื่องดับกลางรอบทีเดียว = ระบบหยุดถาวรจนกว่าจะมีคนมาลบไฟล์เอง
+    ยึด lock คืนได้ 2 กรณี:
+      1. โปรเซสเจ้าของ lock ตายไปแล้ว (เช่นถูกสั่งหยุด / เครื่องดับกลางรอบ)
+      2. lock เก่าเกิน 6 ชม. (เผื่ออ่าน pid ไม่ได้ หรือ pid ถูกใช้ซ้ำ)
+
+    ข้อ 1 สำคัญมากสำหรับรอบตี 6 — ถ้าไม่มี ไฟดับกลางรอบทีเดียว
+    วันถัดไปจะรันไม่ได้เลยจนกว่าจะมีคนมาลบไฟล์เอง (เจอจริง 2026-08-04)
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if lock_path.exists():
         age = time.time() - lock_path.stat().st_mtime
-        if age < 6 * 3600:
+        owner = _lock_owner_pid(lock_path)
+
+        if not _pid_alive(owner):
+            log.warning("stale_lock_taken_over", lock=str(lock_path),
+                        dead_pid=owner, age_sec=round(age), reason="เจ้าของ lock ตายแล้ว")
+        elif age < 6 * 3600:
             raise AlreadyRunningError(
-                f"มีรอบที่กำลังรันอยู่ (lock อายุ {age / 60:.0f} นาที) — {lock_path}"
+                f"มีรอบที่กำลังรันอยู่จริง (pid {owner}, lock อายุ {age / 60:.0f} นาที) "
+                f"— {lock_path}"
             )
-        log.warning("stale_lock_taken_over", lock=str(lock_path), age_sec=round(age))
+        else:
+            log.warning("stale_lock_taken_over", lock=str(lock_path),
+                        dead_pid=owner, age_sec=round(age), reason="lock เก่าเกิน 6 ชม.")
 
     lock_path.write_text(f"{os.getpid()} {datetime.now().isoformat()}", encoding="utf-8")
     try:

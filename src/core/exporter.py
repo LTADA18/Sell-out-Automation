@@ -64,6 +64,22 @@ def _autofit(ws: Worksheet, max_width: int = 42) -> None:
         ws.column_dimensions[letter].width = min(max(widest + 2, 10), max_width)
 
 
+#  อักขระที่ Windows ห้ามใช้ในชื่อไฟล์ — ชื่อร้านจริงมีทั้งวงเล็บ เว้นวรรค และภาษาไทย
+_BAD_CHARS = r'\/:*?"<>|'
+
+
+def safe_name(name: str, max_len: int = 30) -> str:
+    """ทำชื่อร้านให้ใช้เป็นชื่อไฟล์ได้ — คงภาษาไทยไว้ แต่ตัดอักขระต้องห้ามทิ้ง
+
+    เว้นวรรคเปลี่ยนเป็น "-" เพื่อให้ก๊อปชื่อไฟล์ไปวางในคำสั่งได้โดยไม่ต้องใส่เครื่องหมายคำพูด
+    ตัดความยาวกันชนเพดาน path ของ Windows (ชื่อร้านบางร้านยาวมาก)
+    """
+    cleaned = "".join(" " if c in _BAD_CHARS else c for c in (name or ""))
+    cleaned = "-".join(cleaned.split())          # ยุบช่องว่างซ้ำ + เปลี่ยนเป็น -
+    cleaned = cleaned.strip("-.")                 # Windows ไม่ชอบชื่อลงท้ายด้วยจุด
+    return cleaned[:max_len].strip("-.") or "ไม่ระบุชื่อ"
+
+
 def _day_of(order: Order) -> str:
     return order.order_created_at.strftime("%Y-%m-%d") if order.order_created_at else NULL
 
@@ -220,14 +236,20 @@ def export_shop(
     """เขียน Excel 1 ไฟล์ คืน path — รันซ้ำวันเดิมได้ (idempotent) ไฟล์เดิมย้ายไป archive"""
     day_dir = Path(output_dir) / run_date
     day_dir.mkdir(parents=True, exist_ok=True)
-    out_path = day_dir / f"{platform}_{shop_id}_{run_date}.xlsx"
+    # ใส่ชื่อร้านในชื่อไฟล์ด้วย — เปิดโฟลเดอร์แล้วรู้เลยว่าไฟล์ไหนของร้านไหน
+    # ยังคง shop_id ไว้เพราะเป็นคีย์ที่ตรงกับ Dashboard/log และไม่เปลี่ยนแม้ร้านจะเปลี่ยนชื่อ
+    out_path = day_dir / f"{platform}_{shop_id}_{safe_name(shop_name)}_{run_date}.xlsx"
 
-    if out_path.exists():
-        # ย้ายของเดิมก่อนทับ — ถ้ารอบใหม่ดึงได้น้อยกว่าเดิม จะได้ย้อนกลับไปดูได้
+    # ย้ายของเดิมก่อนทับ — ถ้ารอบใหม่ดึงได้น้อยกว่าเดิม จะได้ย้อนกลับไปดูได้
+    # ใช้ glob เพราะไฟล์เก่าอาจเป็นชื่อรูปแบบก่อนหน้า (ยังไม่มีชื่อร้าน) หรือร้านเปลี่ยนชื่อ
+    old = [p for p in day_dir.glob(f"{platform}_{shop_id}_*{run_date}.xlsx")]
+    old += [p for p in day_dir.glob(f"{platform}_{shop_id}_{run_date}.xlsx")]
+    if old:
         arc_dir = Path(archive_dir) / run_date
         arc_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%H%M%S")
-        shutil.move(str(out_path), str(arc_dir / f"{out_path.stem}_{stamp}.xlsx"))
+        for p in dict.fromkeys(old):              # กันซ้ำถ้า glob ทั้งสองอันชนกัน
+            shutil.move(str(p), str(arc_dir / f"{p.stem}_{stamp}.xlsx"))
 
     wb = Workbook()
     wb.remove(wb.active)                     # ตัด sheet เปล่าที่ openpyxl แถมมา
