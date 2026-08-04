@@ -11,7 +11,12 @@ param(
     [string]$Shop,
     [string]$Platform,
     [string]$Date,
-    [switch]$SkipIfDone
+    [switch]$SkipIfDone,
+    # ปกติไม่ส่งอีเมลที่นี่ — มี task แยกส่งตอน 8 โมง (ดู install_scheduler.ps1)
+    # เผื่อไว้สำหรับกรณีอยากดึงแล้วส่งเลยในคำสั่งเดียว
+    [switch]$Mail,
+    [string]$MailTo = "Pitchaya.L@imaxpowertool.com",
+    [string]$MailCc = "Natcha.S@imaxpowertool.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +51,15 @@ try {
     Write-Host "Dashboard: output\dashboard.html" -ForegroundColor Cyan
 } catch {
     Write-Host "สร้าง Dashboard ไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
+}
+
+# ครอบ try/catch เหมือน Dashboard: อีเมลไม่ออกไม่ควรทำให้ exit code ของรอบเพี้ยน
+if ($Mail) {
+    try {
+        & $py -m src.cli notify --to $MailTo --cc $MailCc
+    } catch {
+        Write-Host "ส่งอีเมลไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
+    }
 }
 
 exit $code

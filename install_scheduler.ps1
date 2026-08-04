@@ -10,6 +10,7 @@
 
 param(
     [string]$Time = "06:00",
+    [string]$MailTime = "08:00",
     [switch]$Status,
     [switch]$RunNow,
     [switch]$Remove
@@ -19,7 +20,20 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 $TaskName = "DealerMKP-DailyOrders"
+$MailTask = "DealerMKP-DailyMail"
 $script   = Join-Path $PSScriptRoot "run_daily.ps1"
+$mailScr  = Join-Path $PSScriptRoot "send_report.ps1"
+
+function Show-One {
+    param([string]$Name)
+    $t = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if (-not $t) {
+        Write-Host "$Name : ยังไม่ได้ติดตั้ง" -ForegroundColor Yellow
+        return
+    }
+    $i = Get-ScheduledTaskInfo -TaskName $Name
+    Write-Host "$Name : $($t.State) | รอบถัดไป $($i.NextRunTime) | รอบล่าสุด $($i.LastRunTime) (ผล $($i.LastTaskResult))"
+}
 
 function Show-Status {
     $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -43,6 +57,9 @@ function Show-Status {
     }
     Write-Host "ผลรอบล่าสุด  : $code ($meaning)"
     foreach ($tr in $t.Triggers) { Write-Host "trigger      : $($tr.CimClass.CimClassName)" }
+    Write-Host ""
+    Write-Host "── งานส่งอีเมล ──"
+    Show-One -Name $MailTask
 }
 
 if ($Status) { Show-Status; exit 0 }
@@ -54,8 +71,12 @@ if ($RunNow) {
 }
 
 if ($Remove) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "ถอด $TaskName ออกแล้ว" -ForegroundColor Green
+    foreach ($n in @($TaskName, $MailTask)) {
+        if (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $n -Confirm:$false
+            Write-Host "ถอด $n ออกแล้ว" -ForegroundColor Green
+        }
+    }
     exit 0
 }
 
@@ -106,6 +127,34 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 Write-Host "ติดตั้ง $TaskName แล้ว — รันทุกวัน $Time" -ForegroundColor Green
+
+# ── งานส่งอีเมล แยกอีกตัว ─────────────────────────────────────
+# แยกจากรอบดึงเพราะดึงเสร็จตี 6 แต่คนเข้างาน 8 โมง
+# และเผื่อรอบตี 6 มี retry ยืดเวลา กว่าจะ 8 โมงก็เสร็จแน่นอน
+$mailAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$mailScr`"" `
+    -WorkingDirectory $PSScriptRoot
+
+$mailSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
+    -RestartCount 2 `
+    -RestartInterval (New-TimeSpan -Minutes 10)
+
+Register-ScheduledTask `
+    -TaskName $MailTask `
+    -Action $mailAction `
+    -Trigger (New-ScheduledTaskTrigger -Daily -At $MailTime) `
+    -Settings $mailSettings `
+    -Principal $principal `
+    -Description "ส่งอีเมลสรุปผลการดึงคำสั่งซื้อประจำวัน (Outlook)" `
+    -Force | Out-Null
+
+Write-Host "ติดตั้ง $MailTask แล้ว — ส่งอีเมลทุกวัน $MailTime" -ForegroundColor Green
 Write-Host ""
 Show-Status
 Write-Host ""
