@@ -8,6 +8,7 @@ from __future__ import annotations
 from src.adapters.base import BaseAdapter
 from src.adapters.lazada import LazadaAdapter
 from src.adapters.mock import MockAdapter
+from src.adapters.shopee import ShopeeAdapter
 from src.adapters.tiktok import TiktokAdapter
 from src.core.config import Settings, ShopConfig
 
@@ -16,7 +17,9 @@ _REGISTRY: dict[tuple[str, str], type[BaseAdapter]] = {
     ("mock", "*"): MockAdapter,
     ("playwright", "lazada"): LazadaAdapter,
     ("playwright", "tiktok"): TiktokAdapter,
-    # Shopee ยังไม่มีร้าน — เพิ่มเมื่อมีไฟล์ Export ตัวอย่างให้ทำ column map
+    # ⚠️ Shopee ลงทะเบียนไว้เพื่อ "ล็อกอินเก็บ session" เท่านั้น ยังดึงข้อมูลไม่ได้
+    #    _export/normalize โยน error ทันที จนกว่าจะมีไฟล์ Export จริงมาทำ column map
+    ("playwright", "shopee"): ShopeeAdapter,
 }
 
 

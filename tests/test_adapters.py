@@ -8,7 +8,7 @@ import pytest
 from src.adapters.mock import MockAdapter
 from src.adapters.registry import build_adapter
 from src.core.logging_setup import mask
-from src.core.models import Order, OrderStatus
+from src.core.models import AdapterError, Order, OrderStatus
 from src.core.privacy import apply_privacy, mask_username
 from tests.conftest import make_order
 
@@ -51,11 +51,25 @@ def test_raw_response_is_saved_for_debugging(shop, settings):
     assert adapter.raw_path("2026-08-02").exists()
 
 
-def test_registry_rejects_unknown_adapter(shop, settings):
-    """Shopee ยังไม่มี adapter — ต้องบอกให้ชัดตอน build ไม่ใช่ไปพังกลางรอบ"""
-    broken = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
-    with pytest.raises(NotImplementedError, match="shopee"):
+def test_registry_rejects_unknown_platform(shop, settings):
+    """แพลตฟอร์มที่ไม่มี adapter ต้องบอกให้ชัดตอน build ไม่ใช่ไปพังกลางรอบ"""
+    broken = shop.model_copy(update={"adapter": "playwright", "platform": "kaidee"})
+    with pytest.raises(NotImplementedError, match="kaidee"):
         build_adapter(broken, settings)
+
+
+def test_shopee_can_build_but_refuses_to_fetch(shop, settings):
+    """Shopee สร้าง adapter ได้เพื่อใช้ล็อกอินเก็บ session — แต่ต้องดึงข้อมูลไม่ได้
+
+    ถ้าวันไหนมีคนเผลอเปิด enabled: true ก่อนทำ column map เสร็จ
+    ต้องได้ error ที่บอกเหตุผลชัด ไม่ใช่ Excel ที่หน้าตาถูกแต่ตัวเลขผิด
+    """
+    s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
+    adapter = build_adapter(s, settings)          # ต้องสร้างได้ ไม่โยน error
+
+    assert adapter.map.fields == {}, "shopee.yaml ยังต้องว่าง จนกว่าจะเห็นไฟล์ Export จริง"
+    with pytest.raises(AdapterError, match="ยังดึงข้อมูลไม่ได้"):
+        adapter.normalize([{"any": "row"}])
 
 
 def test_registered_platforms_have_column_maps(shop, settings):
