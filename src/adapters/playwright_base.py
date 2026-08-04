@@ -181,6 +181,13 @@ class PlaywrightAdapter(BaseAdapter):
         """
         from playwright.sync_api import sync_playwright
 
+        # ⚠️ ต้องปิดของเดิมก่อนเสมอ — ตอน retry runner เรียก fetch_orders ซ้ำ
+        # ซึ่งเรียก _open_page ซ้ำด้วย ถ้าไม่ปิด Chrome ตัวเก่ายังจับ profile_dir อยู่
+        # ตัวใหม่จะเปิดไม่ขึ้น (ProcessSingleton) แล้ว retry ล้มเหลวทุกครั้งโดยไม่มีสาเหตุชัด
+        if self._context is not None or self._pw is not None:
+            log.info("reopening_browser", shop_id=self.shop.shop_id)
+            self.close()
+
         self._pw = sync_playwright().start()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         opts = dict(
@@ -296,9 +303,24 @@ class PlaywrightAdapter(BaseAdapter):
             )
 
     def _capture_download(self, page, action, timeout_ms: int = 180_000) -> Path:
-        """ดักไฟล์ที่กำลังจะถูกดาวน์โหลด — ชื่อไฟล์ของ Lazada เป็น hash สุ่ม เดาไม่ได้"""
-        with page.expect_download(timeout=timeout_ms) as info:
-            action()
+        """ดักไฟล์ที่กำลังจะถูกดาวน์โหลด — ชื่อไฟล์ของ Lazada เป็น hash สุ่ม เดาไม่ได้
+
+        ⚠️ "ไฟล์สร้างเสร็จแล้วแต่ดาวน์โหลดไม่มา" เป็นอาการชั่วคราวของแพลตฟอร์ม
+        (เจอกับ tiktok_03 มาแล้ว รันซ้ำทันทีก็ผ่าน) จึงต้องเป็น TIMEOUT ไม่ใช่ PARSE_ERROR
+        เพราะ PARSE_ERROR อยู่นอก RETRYABLE รอบตี 6 จะไม่ลองซ้ำให้เลย
+        """
+        from playwright.sync_api import TimeoutError as PWTimeout
+
+        try:
+            with page.expect_download(timeout=timeout_ms) as info:
+                action()
+        except PWTimeout as exc:
+            self._screenshot_on_error(page, "download_timeout")
+            raise AdapterError(
+                ErrorType.TIMEOUT,
+                f"กด Export แล้วไฟล์ไม่ถูกดาวน์โหลดภายใน {timeout_ms // 1000} วินาที "
+                f"— มักเป็นอาการชั่วคราว ลองใหม่อีกรอบ",
+            ) from exc
         download = info.value
         dest = self.download_dir("") / f"{self.shop.shop_id}_{datetime.now():%Y%m%d_%H%M%S}_{download.suggested_filename}"
         download.save_as(dest)

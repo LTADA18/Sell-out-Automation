@@ -258,10 +258,11 @@ class LazadaAdapter(PlaywrightAdapter):
 
         try:
             return self._capture_download(page, trigger, timeout_ms=180_000)
-        except AdapterError:
-            raise
-        except Exception:                                # noqa: BLE001
-            # ไฟล์ไม่เด้งเอง — ลองกดลิงก์ "ดาวน์โหลดไฟล์" ใน modal ผลลัพธ์
+        except AdapterError as exc:
+            # TIMEOUT = กดสำเร็จแต่ไฟล์ไม่เด้งเอง ยังมีทางรอด: กดลิงก์ในกล่องผลลัพธ์
+            # error อื่น (หาปุ่มไม่เจอ ฯลฯ) ลองต่อไปก็ไม่มีประโยชน์
+            if exc.error_type is not ErrorType.TIMEOUT:
+                raise
             log.warning("auto_download_missed", shop_id=self.shop.shop_id)
             return self._capture_download(
                 page, lambda: _click_first(page, SEL["download_link"], 20000), 120_000
