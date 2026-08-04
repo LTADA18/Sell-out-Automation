@@ -124,7 +124,18 @@ class ShopeeAdapter(PlaywrightAdapter):
         """
         want = self.shop.web_name
 
+        # เด้งไปหน้า login = ยังไม่ได้ล็อกอิน ปล่อยให้ _ensure_logged_in รายงาน AUTH_EXPIRED
+        # ถ้าไม่กันตรงนี้ ตัวกัน "อยู่ผิดร้าน" จะรายงานเป็น PARSE_ERROR ซึ่งชวนไขว้เขว
+        if any(k in page.url.lower() for k in ("login", "signin")):
+            return
+
         if "/portal/shop" not in page.url:
+            # ⚠️ เช็คเฉพาะร้านที่ประกาศ profile_key = ใช้บัญชีร่วมกับร้านอื่น
+            #    บัญชีที่มีร้านเดียวจะเข้าหน้าคำสั่งซื้อตรง ๆ ไม่มีหน้าเลือกร้านให้กลับไป
+            #    เคยเช็คทุกร้านแล้วทำให้ shopee_05/06 ที่เคยดึงได้พังไปด้วย
+            if not self.shop.profile_key:
+                return
+
             current = self._current_shop_name(page)
             if current and current.lower() == want.lower():
                 return                                   # อยู่ถูกร้านแล้ว
