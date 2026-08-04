@@ -10,6 +10,7 @@ import click
 
 from src.adapters.registry import build_adapter
 from src.core.config import PROJECT_ROOT, load_config
+from src.core import mailer
 from src.core.dashboard import build as build_dashboard
 from src.core.logging_setup import setup_logging
 from src.core.runner import AlreadyRunningError, Runner, run_lock, summarize
@@ -170,6 +171,50 @@ def login(shop: str) -> None:
         adapter.interactive_login()
     finally:
         adapter.close()
+
+
+@cli.command()
+@click.option("--to", "to_s", help="ผู้รับ คั่นด้วย , (ไม่ใส่ = ส่งหาตัวเองเพื่อทดสอบ)")
+@click.option("--cc", "cc_s", help="สำเนาถึง คั่นด้วย ,")
+@click.option("--date", "run_date_s", help="วันที่ของรอบ (YYYY-MM-DD) ค่าเริ่มต้น=รอบล่าสุดใน db")
+@click.option("--no-excel", is_flag=True, help="แนบแค่ dashboard.html ไม่แนบ Excel")
+@click.option("--draft", is_flag=True, help="เปิดหน้าต่างร่างให้ตรวจก่อน ไม่ส่งทันที")
+def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
+           no_excel: bool, draft: bool) -> None:
+    """ส่งสรุปผลการดึงทางอีเมลผ่าน Outlook"""
+    cfg = load_config()
+    out_dir = PROJECT_ROOT / cfg.settings.paths.output_dir
+    db = PROJECT_ROOT / cfg.settings.paths.db_path
+
+    run_date, rows = mailer.read_rows(db, _parse(run_date_s, "--date").isoformat()
+                                      if run_date_s else None)
+    if not rows:
+        click.echo(f"❌ ไม่มีข้อมูลของ {run_date} ใน run_log — ยังไม่ได้รันรอบนั้น", err=True)
+        sys.exit(1)
+
+    to = [x.strip() for x in (to_s or "").split(",") if x.strip()]
+    cc = [x.strip() for x in (cc_s or "").split(",") if x.strip()]
+    attachments = mailer.collect_attachments(out_dir, run_date, with_excel=not no_excel)
+
+    if not to:
+        # ไม่ระบุผู้รับ = โหมดทดสอบ ส่งหาบัญชี Outlook ของตัวเอง
+        import win32com.client as win32
+
+        to = [win32.Dispatch("Outlook.Application")
+              .GetNamespace("MAPI").Accounts.Item(1).SmtpAddress]
+        click.echo(f"(โหมดทดสอบ) ส่งหาตัวเอง: {to[0]}")
+
+    subject = mailer.build_subject(run_date, rows)
+    html = mailer.build_html(run_date, rows)
+    sender = mailer.send(subject, html, to, cc, attachments, send_now=not draft)
+
+    click.echo(f"{'📝 เปิดร่างแล้ว' if draft else '✅ ส่งแล้ว'}")
+    click.echo(f"   จาก    : {sender}")
+    click.echo(f"   ถึง    : {', '.join(to)}")
+    if cc:
+        click.echo(f"   สำเนา  : {', '.join(cc)}")
+    click.echo(f"   หัวข้อ : {subject}")
+    click.echo(f"   แนบ    : {len(attachments)} ไฟล์")
 
 
 @cli.command()
