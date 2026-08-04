@@ -27,7 +27,14 @@ log = get_logger()
 # แล้วเดินหน้าไปกด Export บนหน้าสมัครสมาชิก
 LOGIN_URL_HINTS = ("/login", "/account/login", "/apps/seller/login", "signin",
                    "/register", "/signup")
-NO_PERMISSION_HINTS = ("ไม่มีสิทธิ์", "no permission", "not authorized", "ไม่ได้ขออนุญาต")
+NO_PERMISSION_HINTS = (
+    "ไม่มีสิทธิ์", "no permission", "not authorized", "ไม่ได้ขออนุญาต",
+    # Shopee: เลือกร้านได้แต่บัญชีไม่มีสิทธิ์ดูหน้าคำสั่งซื้อของร้านนั้น
+    # (เจอจริงกับ yonghouse_official / Yong House / บ้านช่าง ใต้บัญชี YM_SP:Osuka)
+    # ถ้าไม่จับตรงนี้จะไปพังตอนหาปุ่มไม่เจอ แล้วรายงานเป็น PARSE_ERROR ซึ่งชวนไขว้เขว
+    "ร้านค้านี้ไม่สามารถเข้าถึงหน้านี้ได้",
+    "cannot access this page",
+)
 
 
 class PlaywrightAdapter(BaseAdapter):

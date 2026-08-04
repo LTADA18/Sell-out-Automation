@@ -1,6 +1,9 @@
 # ─────────────────────────────────────────────────────────────
-#  ร้านที่มีอยู่จริงตอนนี้: Lazada 1 + TikTok 5 = 6 ร้าน
-#  (Shopee ยังไม่มีร้าน — เพิ่มทีหลังได้ ดูตัวอย่างท้ายไฟล์)
+#  ร้านที่มีอยู่จริงตอนนี้: Lazada 1 + TikTok 5 + Shopee 10 = 16 ร้าน
+#
+#  ⚠️ Shopee 10 ร้าน มาจาก 7 บัญชี — 1 บัญชีดูแลได้หลายร้าน
+#     ร้านที่อยู่ใต้บัญชีเดียวกันใช้ profile_key เดียวกัน = ล็อกอินครั้งเดียวพอ
+#     แต่แยก shop_id เพื่อออก Excel คนละไฟล์ ชื่อร้านไม่ปนกัน
 #
 #  ⚠️ ห้ามใส่รหัสผ่านในไฟล์นี้เด็ดขาด ไฟล์นี้ถูก commit ขึ้น git
 #     อีเมลที่ใช้ล็อกอินอยู่ใน .env (ไม่ถูก commit) อ้างผ่าน account_key
@@ -56,25 +59,20 @@ shops:
     account_key: TIKTOK_05
     enabled: true
 
-  # ── Shopee: 7 ร้าน ────────────────────────────────────────
+  # ── Shopee: 10 ร้าน จาก 7 บัญชี ───────────────────────────
   #
-  # ⚠️ ทั้ง 7 ร้านตั้ง enabled: false ไว้ก่อน — ตั้งใจ ไม่ใช่ลืม
-  #    ยังไม่มีขั้นตอน Export ของ Shopee (ดู src/adapters/shopee.py)
-  #    ถ้าเปิดใช้ตอนนี้จะขึ้น 🔴 FAILED ทุกวันจนสีแดงเฝือ
-  #    ปิดไว้จะขึ้น ⚪ SKIPPED พร้อมเหตุผลบน Dashboard
+  # web_shop_name = ชื่อร้านบนหน้า /portal/shop "เลือกร้านที่จะจัดการ"
+  #                 ต้องตรงเป๊ะถึงจะกดถูกแถว (ไม่ใส่ = ใช้ display_name)
+  # profile_key   = ใช้โปรไฟล์/session ร่วมกับร้านอื่น (ไม่ใส่ = ใช้ shop_id ตัวเอง)
   #
-  # ล็อกอินเก็บ session ได้เลยตั้งแต่ตอนนี้ (ไม่ต้องรอโค้ด Export เสร็จ):
-  #    python -m src.cli login --shop shopee_01
-  #
-  # พอทำ column map เสร็จแล้วค่อยเปลี่ยนเป็น adapter: playwright + enabled: true
+  # ล็อกอิน: python -m src.cli login --shop shopee_01
 
   - shop_id: shopee_01
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "เฮียคิมคลองถม"
     account_key: SHOPEE_01
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_02
     platform: shopee
@@ -90,47 +88,42 @@ shops:
   #    แต่แยกเป็นคนละ shop_id เพื่อให้ออก Excel คนละไฟล์ ชื่อร้านไม่ปนกัน
   - shop_id: shopee_03
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "Toolspartner"
     web_shop_name: "Toolspartner"
     profile_key: shopee_03
     account_key: SHOPEE_03
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_08
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "TNLTOOLSTORE"
     web_shop_name: "TNLTOOLSTORE"
     profile_key: shopee_03          # ใช้ session เดียวกับ Toolspartner
     account_key: SHOPEE_03
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_04
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "Powerstools"
     account_key: SHOPEE_04
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_05
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "เฮียเก๋า เครื่องมือช่างราคาถูก"
     account_key: SHOPEE_05
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_06
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "กัปตัน เอกสตีล"
     account_key: SHOPEE_06
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   # ⚠️ บัญชี YM_SP:Osuka ดูแล 3 ร้าน — ใช้ profile_key เดียวกันทั้งหมด
   #    ตอนแรกใน shops.yaml มีแค่ "ยงเฮ้าส์ (Mall)" ร้านเดียว
@@ -138,30 +131,27 @@ shops:
   #    web_shop_name ต้องตรงกับที่โชว์บนหน้าเว็บเป๊ะ ๆ ถึงจะกดถูกแถว
   - shop_id: shopee_07
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "Yonghouse Official Store"      # ตัว Mall (Shopee เรียก Official Store)
     web_shop_name: "Yonghouse Official Store"
     profile_key: shopee_07
     account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_09
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "Yong House ยงเฮ้าส์"
     web_shop_name: "Yong House ยงเฮ้าส์"
     profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
     account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   - shop_id: shopee_10
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "บ้านช่าง Baanchang"
     web_shop_name: "บ้านช่าง Baanchang"
     profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
     account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
