@@ -86,9 +86,12 @@ if (-not (Test-Path $script)) {
     exit 1
 }
 
+# -Mail = ส่งอีเมลท้ายรอบทันทีที่ดึงเสร็จ
+# สำคัญสำหรับเครื่องโน้ตบุ๊กที่เปิดสาย: รอบดึงจะเริ่มตอนล็อกอิน ไม่ใช่ตามนาฬิกา
+# ถ้าปล่อยให้อีเมลยิงตามเวลาอย่างเดียว จะส่งตอนข้อมูลยังดึงไม่เสร็จ
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -SkipIfDone" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -SkipIfDone -Mail" `
     -WorkingDirectory $PSScriptRoot
 
 # trigger 1: ทุกวันตามเวลาที่ตั้ง
@@ -131,9 +134,12 @@ Write-Host "ติดตั้ง $TaskName แล้ว — รันทุก�
 # ── งานส่งอีเมล แยกอีกตัว ─────────────────────────────────────
 # แยกจากรอบดึงเพราะดึงเสร็จตี 6 แต่คนเข้างาน 8 โมง
 # และเผื่อรอบตี 6 มี retry ยืดเวลา กว่าจะ 8 โมงก็เสร็จแน่นอน
+# งานนี้เป็น "ตาข่ายรองรับ" ไม่ใช่ตัวส่งหลัก — ตัวหลักคือท้าย run_daily.ps1
+# -SkipIfSent กันส่งซ้ำ: ถ้ารอบดึงส่งไปแล้ววันนี้ ตัวนี้จะออกทันทีไม่ส่งอีกฉบับ
+# มีไว้เผื่อรอบดึงพังกลางทางจนไม่ได้ส่ง หรือวันที่เครื่องเปิดหลัง 8 โมง
 $mailAction = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$mailScr`"" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$mailScr`" -SkipIfSent" `
     -WorkingDirectory $PSScriptRoot
 
 $mailSettings = New-ScheduledTaskSettingsSet `
@@ -145,10 +151,19 @@ $mailSettings = New-ScheduledTaskSettingsSet `
     -RestartCount 2 `
     -RestartInterval (New-TimeSpan -Minutes 10)
 
+$mailTriggers = @(
+    (New-ScheduledTaskTrigger -Daily -At $MailTime),
+    # trigger ตอนล็อกอิน + หน่วง 25 นาที — เผื่อเปิดเครื่องสาย
+    # หน่วงเพื่อให้รอบดึง (ที่เริ่มตอนล็อกอินเหมือนกัน) ทำงานจบก่อน
+    # ถ้ารอบดึงส่งอีเมลไปแล้ว -SkipIfSent จะกันไม่ให้ส่งซ้ำอยู่ดี
+    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
+)
+$mailTriggers[1].Delay = "PT25M"
+
 Register-ScheduledTask `
     -TaskName $MailTask `
     -Action $mailAction `
-    -Trigger (New-ScheduledTaskTrigger -Daily -At $MailTime) `
+    -Trigger $mailTriggers `
     -Settings $mailSettings `
     -Principal $principal `
     -Description "ส่งอีเมลสรุปผลการดึงคำสั่งซื้อประจำวัน (Outlook)" `

@@ -179,8 +179,10 @@ def login(shop: str) -> None:
 @click.option("--date", "run_date_s", help="วันที่ของรอบ (YYYY-MM-DD) ค่าเริ่มต้น=รอบล่าสุดใน db")
 @click.option("--no-excel", is_flag=True, help="แนบแค่ dashboard.html ไม่แนบ Excel")
 @click.option("--draft", is_flag=True, help="เปิดหน้าต่างร่างให้ตรวจก่อน ไม่ส่งทันที")
+@click.option("--skip-if-sent", is_flag=True,
+              help="ถ้าส่งของวันนี้ไปแล้วให้ออกทันที (ใช้กับ task สำรอง)")
 def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
-           no_excel: bool, draft: bool) -> None:
+           no_excel: bool, draft: bool, skip_if_sent: bool) -> None:
     """ส่งสรุปผลการดึงทางอีเมลผ่าน Outlook"""
     cfg = load_config()
     out_dir = PROJECT_ROOT / cfg.settings.paths.output_dir
@@ -188,6 +190,13 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
 
     run_date, rows = mailer.read_rows(db, _parse(run_date_s, "--date").isoformat()
                                       if run_date_s else None)
+
+    # กันส่งซ้ำ — รอบหลักส่งท้าย run_daily แล้ว task สำรองตอน 8 โมงจะได้ไม่ส่งอีกฉบับ
+    marker = PROJECT_ROOT / cfg.settings.paths.logs_dir / f".mail_sent_{run_date}"
+    if skip_if_sent and marker.exists():
+        click.echo(f"ข้าม — ส่งอีเมลของ {run_date} ไปแล้วเมื่อ "
+                   f"{marker.read_text(encoding='utf-8').strip()}")
+        sys.exit(0)
     if not rows:
         click.echo(f"❌ ไม่มีข้อมูลของ {run_date} ใน run_log — ยังไม่ได้รันรอบนั้น", err=True)
         sys.exit(1)
@@ -207,6 +216,10 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
     subject = mailer.build_subject(run_date, rows)
     html = mailer.build_html(run_date, rows)
     sender = mailer.send(subject, html, to, cc, attachments, send_now=not draft)
+
+    if not draft:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
 
     click.echo(f"{'📝 เปิดร่างแล้ว' if draft else '✅ ส่งแล้ว'}")
     click.echo(f"   จาก    : {sender}")

@@ -15,7 +15,9 @@ param(
     [string]$To = "Pitchaya.L@imaxpowertool.com",
     [string]$Cc = "Natcha.S@imaxpowertool.com",
     [switch]$NoExcel,
-    [switch]$Draft
+    [switch]$Draft,
+    # กันส่งซ้ำ — ถ้ารอบดึงส่งอีเมลของวันนี้ไปแล้ว ให้ออกทันที
+    [switch]$SkipIfSent
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,8 +35,9 @@ try { & $py -m src.cli dashboard | Out-Null } catch { }
 $cliArgs = @("-m", "src.cli", "notify", "--to", $To)
 if ($Cc)      { $cliArgs += @("--cc", $Cc) }
 if ($Date)    { $cliArgs += @("--date", $Date) }
-if ($NoExcel) { $cliArgs += "--no-excel" }
-if ($Draft)   { $cliArgs += "--draft" }
+if ($NoExcel)    { $cliArgs += "--no-excel" }
+if ($Draft)      { $cliArgs += "--draft" }
+if ($SkipIfSent) { $cliArgs += "--skip-if-sent" }
 
 Write-Host "ส่งสรุปผลการดึง $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 & $py @cliArgs

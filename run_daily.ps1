@@ -12,8 +12,9 @@ param(
     [string]$Platform,
     [string]$Date,
     [switch]$SkipIfDone,
-    # ปกติไม่ส่งอีเมลที่นี่ — มี task แยกส่งตอน 8 โมง (ดู install_scheduler.ps1)
-    # เผื่อไว้สำหรับกรณีอยากดึงแล้วส่งเลยในคำสั่งเดียว
+    # ส่งอีเมลท้ายรอบ = การันตีว่าอีเมลออกหลังดึงเสร็จเสมอ
+    # (เครื่องเป็นโน้ตบุ๊ก เปิด 8 โมง รอบดึงจะเริ่มตอนล็อกอิน ไม่ใช่ตี 6
+    #  ถ้าตั้งอีเมลตามนาฬิกาจะส่งตอนข้อมูลยังไม่ครบ)
     [switch]$Mail,
     [string]$MailTo = "Pitchaya.L@imaxpowertool.com",
     [string]$MailCc = "Natcha.S@imaxpowertool.com"
