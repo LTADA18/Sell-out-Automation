@@ -134,6 +134,68 @@ def collect_attachments(output_dir: Path, run_date: str,
     return files
 
 
+def _ensure_outlook_running(wait_sec: int = 40) -> bool:
+    """เปิด Outlook ถ้ายังไม่เปิด แล้วรอจนพร้อม
+
+    ⚠️ จำเป็นมาก: mail.Send() แค่หย่อนอีเมลลง Outbox เท่านั้น
+    ตัวที่ส่งออกจริงคือโปรเซส Outlook ถ้าไม่เปิดอยู่ อีเมลจะค้างในคิวเงียบ ๆ
+    โดยที่โค้ดรายงานว่า "ส่งแล้ว" (เจอจริง 2026-08-04 — Outbox 1 / Sent 0)
+    รอบตี 6 ไม่มีใครเปิด Outlook ให้ จึงต้องเปิดเอง
+    """
+    import subprocess
+    import time
+
+    import win32com.client as win32
+
+    try:
+        if subprocess.run(["tasklist", "/FI", "IMAGENAME eq OUTLOOK.EXE"],
+                          capture_output=True, text=True).stdout.count("OUTLOOK.EXE"):
+            return True
+    except Exception:                                    # noqa: BLE001
+        pass
+
+    for exe in (
+        r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\OUTLOOK.EXE",
+    ):
+        if Path(exe).exists():
+            subprocess.Popen([exe], creationflags=0x00000008)   # DETACHED_PROCESS
+            break
+    else:
+        return False
+
+    deadline = time.time() + wait_sec
+    while time.time() < deadline:
+        time.sleep(3)
+        try:
+            win32.Dispatch("Outlook.Application").GetNamespace("MAPI").GetDefaultFolder(6)
+            return True
+        except Exception:                                # noqa: BLE001
+            continue
+    return False
+
+
+def flush_outbox(wait_sec: int = 90) -> tuple[int, int]:
+    """สั่ง Send/Receive แล้วรอจน Outbox ว่าง — คืน (ค้างก่อน, ค้างหลัง)"""
+    import time
+
+    import win32com.client as win32
+
+    ns = win32.Dispatch("Outlook.Application").GetNamespace("MAPI")
+    before = ns.GetDefaultFolder(4).Items.Count          # 4 = Outbox
+    try:
+        ns.SendAndReceive(False)
+    except Exception:                                    # noqa: BLE001
+        pass
+
+    deadline = time.time() + wait_sec
+    while time.time() < deadline:
+        if ns.GetDefaultFolder(4).Items.Count == 0:
+            return before, 0
+        time.sleep(5)
+    return before, ns.GetDefaultFolder(4).Items.Count
+
+
 def send(subject: str, html: str, to: list[str], cc: list[str] | None = None,
          attachments: list[Path] | None = None, send_now: bool = True) -> str:
     """ส่ง (หรือเปิดร่าง) ผ่าน Outlook — คืนที่อยู่ผู้ส่งที่ใช้จริง
@@ -141,6 +203,9 @@ def send(subject: str, html: str, to: list[str], cc: list[str] | None = None,
     send_now=False จะเปิดหน้าต่างร่างให้ตรวจก่อนกดส่งเอง
     """
     import win32com.client as win32
+
+    if send_now:
+        _ensure_outlook_running()
 
     outlook = win32.Dispatch("Outlook.Application")
     mail = outlook.CreateItem(0)                 # 0 = MailItem
@@ -160,6 +225,7 @@ def send(subject: str, html: str, to: list[str], cc: list[str] | None = None,
 
     if send_now:
         mail.Send()
+        flush_outbox()                                   # ดันออกจาก Outbox ให้จริง
     else:
         mail.Display(False)
     return sender
