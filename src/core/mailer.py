@@ -194,8 +194,12 @@ def set_reminders(run_time: str, minutes: list[int]) -> list[str]:
 
         pattern = appt.GetRecurrencePattern()
         pattern.RecurrenceType = 0                       # 0 = olRecursDaily
-        pattern.PatternStartDate = start_dt
+        # ⚠️ ต้องตั้ง Interval ด้วย ไม่งั้นเป็น 0 = ไม่เกิดซ้ำเลย
+        #    นัดจะมีแค่ของวันแรกวันเดียว แล้วเงียบไปตลอด (เจอจริง 2026-08-04)
+        pattern.Interval = 1                             # ทุก 1 วัน
+        pattern.PatternStartDate = start_dt              # ต้องเป็น datetime ไม่ใช่ date
         pattern.StartTime = start_dt
+        pattern.Duration = 5                             # นาที
         pattern.NoEndDate = True
 
         appt.Save()
