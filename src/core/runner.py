@@ -56,9 +56,24 @@ def run_lock(lock_path: Path) -> Iterator[None]:
         lock_path.unlink(missing_ok=True)
 
 
+# ⚠️ Playwright ไม่ได้โยน ConnectionError — มันโยน Error ของตัวเองที่มีข้อความ
+#    net::ERR_* อยู่ข้างใน ถ้าไม่ดักด้วยข้อความจะกลายเป็น UNKNOWN ซึ่งอยู่นอก RETRYABLE
+#    แล้วรอบตี 6 จะไม่ลองซ้ำให้ ทั้งที่เน็ตสะดุดแป๊บเดียวก็ผ่าน (เจอ 2 ครั้งใน 2026-08-04)
+_NET_MARKERS = (
+    "err_connection", "err_name_not_resolved", "err_internet_disconnected",
+    "err_network_changed", "err_proxy", "err_address_unreachable",
+    "err_socket_not_connected", "net::err_timed_out",
+)
+
+
 def _classify(exc: Exception) -> tuple[ErrorType, str]:
     if isinstance(exc, AdapterError):
         return exc.error_type, exc.message
+
+    text = str(exc).lower()
+    if any(k in text for k in _NET_MARKERS):
+        return ErrorType.NETWORK, f"เน็ตสะดุด: {exc}"
+
     if isinstance(exc, TimeoutError):
         return ErrorType.TIMEOUT, str(exc) or "หมดเวลารอ"
     if isinstance(exc, (ConnectionError, OSError)):
