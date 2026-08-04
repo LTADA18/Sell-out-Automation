@@ -109,6 +109,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
+    -WakeToRun `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -RestartCount 2 `
     -RestartInterval (New-TimeSpan -Minutes 10)
@@ -147,6 +148,7 @@ $mailSettings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
+    -WakeToRun `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
     -RestartCount 2 `
     -RestartInterval (New-TimeSpan -Minutes 10)
