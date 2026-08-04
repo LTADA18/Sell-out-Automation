@@ -58,13 +58,17 @@ class PlaywrightAdapter(BaseAdapter):
 
     @property
     def profile_dir(self) -> Path:
-        """โปรไฟล์ Chrome เต็ม ๆ แยก 1 โฟลเดอร์ต่อ 1 ร้าน
+        """โปรไฟล์ Chrome เต็ม ๆ แยก 1 โฟลเดอร์ต่อ 1 บัญชี
 
         เก็บทั้ง cookie / localStorage / IndexedDB / device trust
         ถ้าเก็บแค่ cookie แพลตฟอร์มจะมองว่าเป็นเครื่องใหม่แล้วขอ OTP ซ้ำ
         โฟลเดอร์นี้แยกจากโปรไฟล์ Chrome ที่ผู้ใช้ใช้งานประจำโดยสิ้นเชิง
+
+        ผูกกับ profile_id ไม่ใช่ shop_id — เพราะ 1 บัญชี Shopee ดูแลได้หลายร้าน
+        ร้านที่อยู่ใต้บัญชีเดียวกันใช้โปรไฟล์ร่วมกัน ล็อกอินครั้งเดียวพอ
+        (ค่าเริ่มต้นของ profile_id คือ shop_id เอง ร้านอื่นจึงไม่มีอะไรเปลี่ยน)
         """
-        return PROJECT_ROOT / self.settings.paths.profiles_dir / self.shop.shop_id
+        return PROJECT_ROOT / self.settings.paths.profiles_dir / self.shop.profile_id
 
     @property
     def session_file(self) -> Path:
@@ -72,7 +76,7 @@ class PlaywrightAdapter(BaseAdapter):
         return (
             PROJECT_ROOT
             / self.settings.paths.sessions_dir
-            / f"{self.shop.shop_id}_state.json"
+            / f"{self.shop.profile_id}_state.json"
         )
 
     @property

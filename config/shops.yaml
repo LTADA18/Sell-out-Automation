@@ -84,10 +84,26 @@ shops:
     enabled: false
     skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
 
+  # ⚠️ บัญชี tnltools:setadosuka ดูแล 2 ร้าน (Toolspartner + TNLTOOLSTORE)
+  #    Shopee มีหน้า /portal/shop "เลือกร้านที่จะจัดการ" คั่นหลังล็อกอิน
+  #    2 ร้านนี้จึงใช้ profile_key เดียวกัน = ล็อกอินครั้งเดียวได้ทั้งคู่
+  #    แต่แยกเป็นคนละ shop_id เพื่อให้ออก Excel คนละไฟล์ ชื่อร้านไม่ปนกัน
   - shop_id: shopee_03
     platform: shopee
     adapter: mock
     display_name: "Toolspartner"
+    web_shop_name: "Toolspartner"
+    profile_key: shopee_03
+    account_key: SHOPEE_03
+    enabled: false
+    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+
+  - shop_id: shopee_08
+    platform: shopee
+    adapter: mock
+    display_name: "TNLTOOLSTORE"
+    web_shop_name: "TNLTOOLSTORE"
+    profile_key: shopee_03          # ใช้ session เดียวกับ Toolspartner
     account_key: SHOPEE_03
     enabled: false
     skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"

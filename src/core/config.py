@@ -41,6 +41,27 @@ class ShopConfig(BaseModel):
     # เก็บแค่ "ชื่อบัญชี" ไว้เตือนตอนสั่ง login — ไม่มีรหัสผ่านอยู่ในระบบนี้ที่ไหนเลย
     account_key: str | None = None
 
+    # ── รองรับ "1 บัญชี ดูแลหลายร้าน" (เจอกับ Shopee) ────────
+    #
+    # Shopee มีหน้า /portal/shop "เลือกร้านที่จะจัดการ" คั่นหลังล็อกอิน
+    # บัญชีเดียวจึงเปิดได้หลายร้าน — session เป็นของ "บัญชี" ไม่ใช่ของ "ร้าน"
+    #
+    # profile_key   : ใช้โปรไฟล์เบราว์เซอร์ร่วมกับร้านอื่น (ค่าว่าง = ใช้ shop_id ตัวเอง)
+    #                 ร้านที่อยู่ใต้บัญชีเดียวกันให้ใส่ค่าเดียวกัน จะได้ล็อกอินครั้งเดียว
+    # web_shop_name : ชื่อร้านที่โชว์บนหน้าเลือกร้าน (ค่าว่าง = ใช้ display_name)
+    #                 แยกไว้เพราะ display_name เป็นชื่อที่เราเรียกกันเอง
+    #                 ส่วนชื่อบนเว็บต้องตรงเป๊ะถึงจะกดถูกแถว
+    profile_key: str | None = None
+    web_shop_name: str | None = None
+
+    @property
+    def profile_id(self) -> str:
+        return self.profile_key or self.shop_id
+
+    @property
+    def web_name(self) -> str:
+        return self.web_shop_name or self.display_name
+
     @property
     def account(self) -> str | None:
         if not self.account_key:
