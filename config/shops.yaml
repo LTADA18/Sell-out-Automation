@@ -23,7 +23,7 @@ shops:
   # ── TikTok Shop ───────────────────────────────────────────
   - shop_id: tiktok_01
     platform: tiktok
-    adapter: mock
+    adapter: playwright
     display_name: "powerstool"
     account_key: TIKTOK_01
     enabled: true
@@ -37,21 +37,21 @@ shops:
 
   - shop_id: tiktok_03
     platform: tiktok
-    adapter: mock
+    adapter: playwright
     display_name: "ฝ้ายการช่าง"
     account_key: TIKTOK_03
     enabled: true
 
   - shop_id: tiktok_04
     platform: tiktok
-    adapter: mock
+    adapter: playwright
     display_name: "100อัน1000อย่าง88"
     account_key: TIKTOK_04
     enabled: true
 
   - shop_id: tiktok_05
     platform: tiktok
-    adapter: mock
+    adapter: playwright
     display_name: "เฮียเก๋าเครื่องมือช่าง ราคาถูก"
     account_key: TIKTOK_05
     enabled: true
