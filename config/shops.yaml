@@ -93,7 +93,8 @@ shops:
     web_shop_name: "Toolspartner"
     profile_key: shopee_03
     account_key: SHOPEE_03
-    enabled: true
+    enabled: false
+    skip_reason: "ร้านนี้ไม่มีปุ่ม Export ในหลังบ้าน (ยืนยันด้วยตาแล้ว 2026-08-04)"
 
   - shop_id: shopee_08
     platform: shopee
@@ -102,7 +103,8 @@ shops:
     web_shop_name: "TNLTOOLSTORE"
     profile_key: shopee_03          # ใช้ session เดียวกับ Toolspartner
     account_key: SHOPEE_03
-    enabled: true
+    enabled: false
+    skip_reason: "ร้านนี้ไม่มีปุ่ม Export ในหลังบ้าน (ยืนยันด้วยตาแล้ว 2026-08-04)"
 
   - shop_id: shopee_04
     platform: shopee
@@ -136,7 +138,8 @@ shops:
     web_shop_name: "Yonghouse Official Store"
     profile_key: shopee_07
     account_key: SHOPEE_07
-    enabled: true
+    enabled: false
+    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
 
   - shop_id: shopee_09
     platform: shopee
@@ -145,7 +148,8 @@ shops:
     web_shop_name: "Yong House ยงเฮ้าส์"
     profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
     account_key: SHOPEE_07
-    enabled: true
+    enabled: false
+    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
 
   - shop_id: shopee_10
     platform: shopee
@@ -154,4 +158,5 @@ shops:
     web_shop_name: "บ้านช่าง Baanchang"
     profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
     account_key: SHOPEE_07
-    enabled: true
+    enabled: false
+    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
