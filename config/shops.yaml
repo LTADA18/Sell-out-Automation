@@ -132,10 +132,36 @@ shops:
     enabled: false
     skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
 
+  # ⚠️ บัญชี YM_SP:Osuka ดูแล 3 ร้าน — ใช้ profile_key เดียวกันทั้งหมด
+  #    ตอนแรกใน shops.yaml มีแค่ "ยงเฮ้าส์ (Mall)" ร้านเดียว
+  #    ตรวจหน้าเลือกร้านจริงแล้วเจอ 3 ร้าน จึงแตกออกมาให้ครบ
+  #    web_shop_name ต้องตรงกับที่โชว์บนหน้าเว็บเป๊ะ ๆ ถึงจะกดถูกแถว
   - shop_id: shopee_07
     platform: shopee
     adapter: mock
-    display_name: "ยงเฮ้าส์ (Mall)"
+    display_name: "Yonghouse Official Store"      # ตัว Mall (Shopee เรียก Official Store)
+    web_shop_name: "Yonghouse Official Store"
+    profile_key: shopee_07
+    account_key: SHOPEE_07
+    enabled: false
+    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+
+  - shop_id: shopee_09
+    platform: shopee
+    adapter: mock
+    display_name: "Yong House ยงเฮ้าส์"
+    web_shop_name: "Yong House ยงเฮ้าส์"
+    profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
+    account_key: SHOPEE_07
+    enabled: false
+    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+
+  - shop_id: shopee_10
+    platform: shopee
+    adapter: mock
+    display_name: "บ้านช่าง Baanchang"
+    web_shop_name: "บ้านช่าง Baanchang"
+    profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
     account_key: SHOPEE_07
     enabled: false
     skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
