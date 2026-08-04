@@ -25,6 +25,7 @@ import shutil
 import sys
 import time
 import traceback
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -55,7 +56,9 @@ def stamp(a: date, b: date) -> str:
 
 def load_state() -> dict:
     if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        # utf-8-sig เผื่อไฟล์ถูกแก้ด้วยเครื่องมืออื่นที่ใส่ BOM มา
+        # (PowerShell 5.1 -Encoding utf8 ใส่ BOM เสมอ — เคยทำ state พังมาแล้ว)
+        return json.loads(STATE_FILE.read_text(encoding="utf-8-sig"))
     return {"requested": [], "collected": {}}
 
 
@@ -80,14 +83,14 @@ def open_shop(adapter):
 TH_MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
              "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม")
 
-# ผู้สมัครปุ่ม "ย้อน 1 เดือน" — ต้องลองหลายตัวแล้ววัดผลจริง
-# ⚠️ .eds-picker-header__prev ตัวเดียวที่ adapter ใช้อยู่ น่าจะไปโดนปุ่ม "ย้อนปี"
-#    กดทีเดียวกระโดด 12 เดือน วนเท่าไหร่ก็ไม่มีทางเจอเดือนที่ต้องการ
-PREV_CANDIDATES = [
-    ".eds-picker-header__prev-month",
-    "button[class*='prev-month']",
-    ".eds-picker-header__prev",
-]
+# ⚠️ หัวปฏิทินมีปุ่ม .eds-picker-header__prev "สองอัน" ในแผงเดียว class เหมือนกันเป๊ะ
+#      nth(0) = ลูกศรคู่ («) ย้อน 1 ปี
+#      nth(1) = ลูกศรเดี่ยว (‹) ย้อน 1 เดือน
+#    adapter เดิมใช้ _click_first ซึ่งหยิบ .first = ปุ่มย้อนปี กดทีเดียวข้าม 12 เดือน
+#    วนเท่าไหร่ก็ไม่มีทางเจอเดือนที่ต้องการ (ยืนยันด้วยการวัดจริง: "ขยับ 12 เดือน")
+#    รอบรายวันไม่เคยเจอเพราะดึงเมื่อวาน = เดือนปัจจุบัน ไม่ต้องเลื่อนปฏิทินเลย
+PANEL_LEFT = ".eds-daterange-picker-panel__body-left"
+PREV_ARROWS = f"{PANEL_LEFT} .eds-picker-header__prev"
 
 
 def panel_label(page, side: str) -> str:
@@ -115,80 +118,84 @@ def months_between(cur: tuple[int, int], want: tuple[int, int]) -> int:
     return (want[0] - cur[0]) * 12 + (want[1] - cur[1])
 
 
-def goto_month(page, target: date, log_fn) -> str:
-    """เลื่อนปฏิทินให้แผงซ้ายเป็นเดือนของ target — คืน selector ที่ใช้ได้
+def goto_month(page, target: date, log_fn) -> None:
+    """เลื่อนแผงซ้ายไปเดือนของ target — ย้อนอย่างเดียว (ช่วงที่ดึงอยู่ก่อนเดือนปัจจุบัน)
 
-    วัดผลจริงหลังกดทุกครั้ง ถ้าขยับ 12 เดือน = กดโดนปุ่มปี ให้เปลี่ยนตัวเลือก
+    วัดผลจริงหลังกดครั้งแรก ถ้า nth(1) ไม่ได้ขยับ 1 เดือนก็สลับไปใช้ nth อีกตัว
+    ไม่ยึดกับสมมติฐานว่าลำดับปุ่มเป็นแบบไหนตายตัว
     """
     want = (target.year, target.month)
-    chosen = ""
+    arrows = page.locator(PREV_ARROWS)
+    n = arrows.count()
+    if n < 2:
+        raise RuntimeError(f"หัวปฏิทินมีปุ่มย้อนแค่ {n} อัน (คาดว่าต้องมี 2: ปี/เดือน)")
 
-    for sel in PREV_CANDIDATES:
-        if page.locator(sel).count() == 0:
-            continue
-        before = parse_label(panel_label(page, "left"))
-        if before is None:
-            continue
-        if before == want:
-            return sel
-        try:
-            page.locator(sel).first.click(timeout=4000)
-        except Exception:                                # noqa: BLE001
-            continue
-        page.wait_for_timeout(800)
-        after = parse_label(panel_label(page, "left"))
-        if after is None or after == before:
-            continue
-        moved = months_between(after, before)            # กดย้อน = before อยู่หลัง after
-        log_fn(f"      selector {sel} ขยับ {moved} เดือน")
-        if moved == 1:
-            chosen = sel
-            break
-        # ขยับผิดจังหวะ (มักคือ 12 = ปุ่มปี) ดันกลับแล้วลองตัวถัดไป
-        fwd = sel.replace("prev", "next")
-        if page.locator(fwd).count():
-            try:
-                page.locator(fwd).first.click(timeout=4000)
-                page.wait_for_timeout(800)
-            except Exception:                            # noqa: BLE001
-                pass
+    idx_month = 1                                        # เดาไว้ก่อนตามที่เห็นใน DOM
+    measured = False
 
-    if not chosen:
-        raise RuntimeError("หาปุ่มย้อนเดือนที่ขยับทีละ 1 เดือนไม่เจอ")
-
-    for _ in range(30):
+    for _ in range(40):
         cur = parse_label(panel_label(page, "left"))
         if cur is None:
             raise RuntimeError("อ่านหัวแผงปฏิทินไม่ได้")
-        diff = months_between(cur, want)
+        diff = months_between(cur, want)                 # ติดลบ = ต้องย้อน
         if diff == 0:
-            return chosen
-        step = chosen if diff < 0 else chosen.replace("prev", "next")
-        if page.locator(step).count() == 0:
-            raise RuntimeError(f"ไม่มีปุ่ม {step}")
-        page.locator(step).first.click(timeout=4000)
+            return
+        if diff > 0:
+            raise RuntimeError(f"เดือนที่แสดง {cur} เลยเป้า {want} ไปแล้ว")
+
+        # ย้อนทีละปีถ้ายังห่างเกิน 12 เดือน จะได้ไม่ต้องกดเป็นสิบครั้ง
+        use_year = diff <= -12
+        arrows.nth(0 if use_year else idx_month).click(timeout=5000)
         page.wait_for_timeout(700)
 
-    raise RuntimeError(f"เลื่อนไปเดือน {target:%Y-%m} ไม่สำเร็จภายใน 30 ครั้ง")
+        after = parse_label(panel_label(page, "left"))
+        if after is None:
+            raise RuntimeError("อ่านหัวแผงปฏิทินหลังกดไม่ได้")
+        moved = months_between(cur, after)               # ติดลบ = ย้อนไปแล้วกี่เดือน
+
+        if not measured and not use_year:
+            log_fn(f"      ปุ่ม nth({idx_month}) ขยับ {moved} เดือน")
+            if moved != -1:
+                idx_month = 0 if idx_month == 1 else 1   # เดาผิด สลับไปอีกตัว
+                log_fn(f"      สลับไปใช้ nth({idx_month})")
+            measured = True
+
+    raise RuntimeError(f"เลื่อนไปเดือน {target:%Y-%m} ไม่สำเร็จภายใน 40 ครั้ง")
 
 
 def close_modal(page) -> None:
     """ปิดกล่องให้สนิทก่อนขึ้นรอบใหม่
 
-    ⚠️ บทเรียนจากรอบแรก: เดือนแรกพังแล้วกล่องค้างเปิด
-       เดือนที่เหลือเลยหาปุ่ม "เปิดกล่อง" ไม่เจอ ล้มต่อกันหมดทั้ง 7 เดือน
+    ⚠️ บทเรียนจาก 2 รอบที่ผ่านมา: พอเดือนไหนพังแล้วกล่องค้างเปิด
+       เดือนที่เหลือหาปุ่ม "เปิดกล่อง" ไม่เจอ ล้มต่อกันหมดทุกเดือนที่เหลือ
+       Escape อย่างเดียวไม่พอ ต้องลองกดปุ่มกากบาทด้วย
     """
-    for _ in range(3):
+    for _ in range(5):
         if page.locator(".eds-modal__box").count() == 0:
             return
         page.keyboard.press("Escape")
-        page.wait_for_timeout(800)
+        page.wait_for_timeout(700)
+        if page.locator(".eds-modal__box").count() == 0:
+            return
+        for sel in (".eds-modal__close", ".eds-modal__box [class*='close']"):
+            btn = page.locator(sel).first
+            if btn.count():
+                try:
+                    btn.click(timeout=3000)
+                    page.wait_for_timeout(700)
+                    break
+                except Exception:                        # noqa: BLE001
+                    continue
 
 
 def request_one(adapter, page, a: date, b: date, log_fn) -> None:
     close_modal(page)
     if not _click_first(page, SEL["open_modal"], 15000):
-        raise RuntimeError('หาปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่เจอ')
+        # กล่องอาจยังค้างจากรอบก่อน — ปิดแล้วลองอีกครั้งก่อนยอมแพ้
+        close_modal(page)
+        page.wait_for_timeout(1500)
+        if not _click_first(page, SEL["open_modal"], 10000):
+            raise RuntimeError('หาปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่เจอ')
     page.wait_for_timeout(3000)
 
     field = page.locator(SEL["range_input"][0]).first
@@ -211,7 +218,11 @@ def phase_request(cfg, st: dict) -> None:
     print("\n===== เฟส 1: สั่งให้ Shopee ปั่นไฟล์ =====", flush=True)
     for shop_id in SHOP_IDS:
         s = cfg.shop(shop_id)
-        todo = [(a, b) for a, b in PERIODS
+        # ⚠️ ไล่จากเดือนหลังไปหน้า (ก.ค. → ม.ค.) โดยตั้งใจ
+        #    ปฏิทินจำตำแหน่งเดือนล่าสุดที่เลือกไว้ ไม่รีเซ็ตกลับเดือนปัจจุบัน
+        #    เรียงถอยหลังแล้วเป้าหมายถัดไปจะอยู่ "ก่อน" ตำแหน่งปัจจุบันเสมอ
+        #    จึงใช้แต่ปุ่มย้อน ไม่ต้องแตะปุ่มเดินหน้า (ซึ่งยังไม่รู้ว่า nth ไหนคือเดือน)
+        todo = [(a, b) for a, b in sorted(PERIODS, reverse=True)
                 if f"{shop_id}|{stamp(a, b)}" not in st["requested"]
                 and f"{shop_id}|{stamp(a, b)}" not in st["collected"]]
         if not todo:
@@ -307,6 +318,29 @@ def phase_collect(cfg, st: dict, rounds: int, wait_min: int) -> None:
 
 # ── เฟส 3: รวมเป็น Excel ร้านละไฟล์ ──────────────────────────
 
+def read_any(adapter, path: Path) -> list[dict]:
+    """อ่านไฟล์ Export — รองรับทั้ง .xlsx เดี่ยว และ .zip ที่ข้างในถูกตัดเป็นหลายส่วน
+
+    ⚠️ เดือนที่ข้อมูลเยอะ Shopee จะตัดเป็น part_1_of_N แล้วบีบเป็น zip มาให้
+       ต้องแตกแล้วอ่านทุกส่วน ไม่งั้นข้อมูลหายทั้งเดือนแบบเงียบ ๆ
+    """
+    if path.suffix.lower() != ".zip":
+        return adapter.map.read_export(path)
+
+    rows: list[dict] = []
+    out = path.with_suffix("")                           # แตกไว้ข้าง ๆ ไฟล์เดิม
+    out.mkdir(exist_ok=True)
+    with zipfile.ZipFile(path) as zf:
+        names = [n for n in zf.namelist() if n.lower().endswith((".xlsx", ".xls", ".csv"))]
+        for n in sorted(names):                          # เรียงให้ part_1 มาก่อน part_2
+            target = out / Path(n).name
+            if not target.exists():
+                with zf.open(n) as src, target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            rows.extend(adapter.map.read_export(target))
+    return rows
+
+
 def phase_merge(cfg, st: dict) -> None:
     print("\n===== เฟส 3: รวมไฟล์ =====", flush=True)
     BASE.mkdir(parents=True, exist_ok=True)
@@ -322,7 +356,7 @@ def phase_merge(cfg, st: dict) -> None:
                 continue
             path = PROJECT_ROOT / rel
             try:
-                rows = adapter.map.read_export(path)
+                rows = read_any(adapter, path)
                 for o in adapter.normalize(rows):
                     merged[f"{o.order_id}|{o.sku}"] = o    # กันซ้ำข้ามเดือน
                 used += 1
@@ -349,7 +383,17 @@ def main() -> int:
     ap.add_argument("--phase", choices=["request", "collect", "merge", "all"], default="all")
     ap.add_argument("--rounds", type=int, default=8, help="เฟสเก็บ วนกี่รอบ")
     ap.add_argument("--wait", type=int, default=12, help="เฟสเก็บ รอกี่นาทีระหว่างรอบ")
+    ap.add_argument("--only-shop", help="ทดสอบร้านเดียว")
+    ap.add_argument("--only-month", type=int, help="ทดสอบเดือนเดียว (1-7)")
     args = ap.parse_args()
+
+    # จำกัดขอบเขตตอนทดสอบ — จะได้รู้เร็วว่าปฏิทินเลื่อนถูกไหม
+    # ไม่ต้องรอเป็นชั่วโมงแล้วมาพบว่าพังตั้งแต่เดือนแรก
+    global SHOP_IDS, PERIODS
+    if args.only_shop:
+        SHOP_IDS = [args.only_shop]
+    if args.only_month:
+        PERIODS = [PERIODS[args.only_month - 1]]
 
     cfg = load_config()
     setup_logging(PROJECT_ROOT / cfg.settings.paths.logs_dir, "shopee_backfill")
