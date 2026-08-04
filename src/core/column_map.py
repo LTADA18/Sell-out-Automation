@@ -85,7 +85,7 @@ class PlatformMap:
                     if all(c is None for c in row):
                         continue
                     padded = list(row) + [None] * (len(header) - len(row))
-                    rows.append(dict(zip(header, padded)))
+                    rows.append(self._dedupe(header, padded))
             return rows
         finally:
             wb.close()
@@ -98,7 +98,30 @@ class PlatformMap:
         for row in reader[self.data_start_row - 1:]:
             if not any(row):
                 continue
-            out.append(dict(zip(header, row + [None] * (len(header) - len(row)))))
+            out.append(self._dedupe(header, row + [None] * (len(header) - len(row))))
+        return out
+
+    @staticmethod
+    def _dedupe(header: list[str], values: list) -> dict[str, Any]:
+        """จับคู่หัวตารางกับค่า โดย **เก็บคอลัมน์แรกไว้** ถ้าชื่อซ้ำ
+
+        ⚠️ dict(zip(...)) เฉย ๆ จะให้คอลัมน์หลังทับคอลัมน์แรก
+        ไฟล์ Shopee มี "จังหวัด" 2 คอลัมน์ (ที่อยู่จัดส่ง กับ ที่อยู่ใบกำกับภาษี)
+        ตัวหลังว่างเกือบทุกแถว ถ้าปล่อยให้ทับ province จะกลายเป็น Null 445/484
+
+        คอลัมน์ที่ซ้ำยังเข้าถึงได้ด้วยชื่อ "<ชื่อ>__2", "<ชื่อ>__3" เผื่อวันหลังต้องใช้
+        """
+        out: dict[str, Any] = {}
+        seen: dict[str, int] = {}
+        for name, value in zip(header, values):
+            if not name:
+                continue
+            if name not in out:
+                out[name] = value
+                seen[name] = 1
+            else:
+                seen[name] += 1
+                out[f"{name}__{seen[name]}"] = value
         return out
 
     # ── แปลงค่า ──────────────────────────────────────────────

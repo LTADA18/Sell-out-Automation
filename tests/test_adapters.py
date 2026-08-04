@@ -58,18 +58,55 @@ def test_registry_rejects_unknown_platform(shop, settings):
         build_adapter(broken, settings)
 
 
-def test_shopee_can_build_but_refuses_to_fetch(shop, settings):
-    """Shopee สร้าง adapter ได้เพื่อใช้ล็อกอินเก็บ session — แต่ต้องดึงข้อมูลไม่ได้
+def test_shopee_column_map_is_wired(shop, settings):
+    """Shopee ต้อง normalize ได้แล้ว และ order_id ต้องเป็น string"""
+    s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
+    adapter = build_adapter(s, settings)
 
-    ถ้าวันไหนมีคนเผลอเปิด enabled: true ก่อนทำ column map เสร็จ
-    ต้องได้ error ที่บอกเหตุผลชัด ไม่ใช่ Excel ที่หน้าตาถูกแต่ตัวเลขผิด
+    assert adapter.map.fields, "shopee.yaml ต้องมี fields แล้ว"
+    orders = adapter.normalize([{
+        "หมายเลขคำสั่งซื้อ": "260803BAG8EKQP",
+        "สถานะการสั่งซื้อ": "ยกเลิกแล้ว",
+        "วันที่ทำการสั่งซื้อ": "2026-08-03 00:00",
+        "จำนวน": "2",
+        "จำนวนเงินทั้งหมด": "2016.00",
+        "จังหวัด": "จังหวัดชัยภูมิ",
+    }])
+    assert len(orders) == 1
+    o = orders[0]
+    assert isinstance(o.order_id, str) and o.order_id == "260803BAG8EKQP"
+    assert o.order_status is OrderStatus.CANCELLED
+    assert o.quantity == 2
+    assert o.province == "จังหวัดชัยภูมิ"
+
+
+def test_shopee_status_with_trailing_text_still_maps(shop, settings):
+    """ค่าสถานะจริงบางตัวยาวกว่าคีย์ใน status_map — ต้องยังจับได้
+
+    ของจริง: "ผู้ซื้อได้รับสินค้าแล้ว โปรดทราบว่าผู้ซื้อ..." ถ้าจับไม่ได้จะกลายเป็น UNKNOWN
     """
     s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
-    adapter = build_adapter(s, settings)          # ต้องสร้างได้ ไม่โยน error
+    adapter = build_adapter(s, settings)
+    orders = adapter.normalize([{
+        "หมายเลขคำสั่งซื้อ": "260803X",
+        "สถานะการสั่งซื้อ": "ผู้ซื้อได้รับสินค้าแล้ว โปรดทราบว่าผู้ซื้อยังขอคืนได้",
+    }])
+    assert orders[0].order_status is OrderStatus.DELIVERED
 
-    assert adapter.map.fields == {}, "shopee.yaml ยังต้องว่าง จนกว่าจะเห็นไฟล์ Export จริง"
-    with pytest.raises(AdapterError, match="ยังดึงข้อมูลไม่ได้"):
-        adapter.normalize([{"any": "row"}])
+
+def test_shopee_does_not_map_financial_columns(shop, settings):
+    """เจ้าของงานสั่งไม่ให้ยุ่งกับข้อมูลการเงิน (2026-08-04)
+
+    ไฟล์ Export ของ Shopee "มี" ค่าคอมมิชชั่น/Transaction Fee/ค่าบริการ อยู่จริง
+    เทสต์นี้กันไม่ให้มีใครเผลอ map เข้ามาโดยไม่ได้ขออนุญาตก่อน
+    """
+    s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
+    adapter = build_adapter(s, settings)
+
+    for field in ("commission_fee", "transaction_fee", "service_fee", "settlement_amount"):
+        assert field not in adapter.map.fields, (
+            f"{field} ถูก map เข้ามาแล้ว — ต้องขออนุญาตเจ้าของงานก่อนแตะข้อมูลการเงิน"
+        )
 
 
 def test_registered_platforms_have_column_maps(shop, settings):

@@ -277,25 +277,43 @@ class ShopeeAdapter(PlaywrightAdapter):
 
     def _wait_for_report(self, page, before: set[str], date_from: date, date_to: date,
                          timeout_sec: int = 300) -> str:
-        """รอจนแถวใหม่ในประวัติสร้างเสร็จ (สปินเนอร์ -> ปุ่มดาวน์โหลด)
+        """รอจนไฟล์ของรอบนี้พร้อมดาวน์โหลด (สปินเนอร์ -> ปุ่มดาวน์โหลด)
 
-        ชื่อไฟล์มีช่วงวันที่ในตัว จึงยืนยันได้ว่าได้ไฟล์ของรอบนี้จริง
-        ไม่ใช่ไฟล์เก่าที่ค้างอยู่ในประวัติ
+        ⚠️ ชื่อไฟล์ Shopee มีแค่ช่วงวันที่ ไม่มีเวลา — ต่างจาก TikTok
+           ดึงช่วงเดิมซ้ำจะได้ชื่อเดิมเป๊ะ เทียบแบบ "มีชื่อใหม่โผล่ไหม" จึงรอเก้อตลอด
+           (เจอจริงตอนรันซ้ำช่วง 20260803_20260803 ที่เคยดึงไปแล้ว)
+
+        จึงดู "แถวบนสุด" แทน — Shopee เรียงใหม่สุดไว้บน
+        ถ้าแถวบนสุดตรงกับช่วงที่ขอ และกดดาวน์โหลดได้ = ไฟล์ของรอบนี้พร้อมแล้ว
         """
         stamp = f"{date_from:%Y%m%d}_{date_to:%Y%m%d}"
         deadline = datetime.now() + timedelta(seconds=timeout_sec)
+        last_seen = ""
 
         while datetime.now() < deadline:
             page.wait_for_timeout(5000)
-            new = self._report_names(page) - before
-            hit = [n for n in new if stamp in n] or sorted(new)
-            if hit and self._try_row_download_button(page, hit[-1]) is not None:
-                return hit[-1]
+            names = list(self._report_names(page))
+            top = self._top_report_name(page) or (names[0] if names else "")
+            if top != last_seen:
+                log.info("shopee_report_top", shop_id=self.shop.shop_id, name=top[:70])
+                last_seen = top
+
+            if stamp in top and self._try_row_download_button(page, top) is not None:
+                return top
 
         raise AdapterError(
             ErrorType.TIMEOUT,
-            f"รอไฟล์ช่วง {stamp} ในประวัติการดาวน์โหลดเกิน {timeout_sec} วินาทีแล้วยังไม่เสร็จ",
+            f"รอไฟล์ช่วง {stamp} ในประวัติการดาวน์โหลดเกิน {timeout_sec} วินาทีแล้วยังไม่เสร็จ "
+            f"(แถวบนสุดตอนนี้: {last_seen[:70]!r})",
         )
+
+    def _top_report_name(self, page) -> str | None:
+        """ชื่อไฟล์แถวบนสุดของประวัติ = รายการล่าสุด"""
+        try:
+            loc = page.locator(SEL["report_rows"][0]).first
+            return loc.inner_text(timeout=4000).strip() if loc.count() else None
+        except Exception:                                # noqa: BLE001
+            return None
 
     def _try_row_download_button(self, page, label: str):
         """ปุ่มดาวน์โหลด "ของแถวนั้น" — ไต่ขึ้นจากชื่อไฟล์ทีละชั้น
@@ -329,8 +347,61 @@ class ShopeeAdapter(PlaywrightAdapter):
         if not self.map.fields:
             raise AdapterError(
                 ErrorType.UNKNOWN,
-                "ยังดึงข้อมูลไม่ได้ — config/column_maps/shopee.yaml ยังไม่มี fields\n"
-                "ต้องได้ไฟล์ Export จริงมาอ่านหัวตารางก่อน แล้วค่อยเติม map\n"
-                "ห้ามเดาชื่อคอลัมน์ เดาผิดจะได้ Excel ที่หน้าตาถูกแต่ตัวเลขผิด",
+                "config/column_maps/shopee.yaml ยังไม่มี fields — ต้องมีไฟล์ Export จริงก่อน",
             )
-        raise AdapterError(ErrorType.UNKNOWN, "normalize() ของ Shopee ยังไม่ได้เขียน")
+
+        rows = raw["rows"] if isinstance(raw, dict) else raw
+        m = self.map
+        orders: list[Order] = []
+
+        for row in rows:
+            order_id = m.to_text(m.get(row, "order_id"))
+            if not order_id:
+                continue
+
+            status_raw = m.get(row, "status_raw")
+            # ⚠️ ค่า "ผู้ซื้อได้รับสินค้าแล้ว โปรดทราบว่า..." ยาวกว่าคีย์ใน status_map
+            #    map_status จับไม่ได้ ต้องตัดให้เหลือส่วนขึ้นต้นที่ตรงกับคีย์ก่อน
+            status_key = status_raw
+            if status_raw:
+                for k in m._status_map:
+                    if str(status_raw).startswith(k):
+                        status_key = k
+                        break
+
+            notes = ["ค่าธรรมเนียม/settlement มีในไฟล์ Export แต่ยังไม่ได้ดึงตามที่กำหนดไว้"]
+            province = m.get(row, "province")
+            if province and str(province).startswith("จังหวัด"):
+                notes.append('province ยังมีคำว่า "จังหวัด" นำหน้าตามไฟล์ต้นทาง')
+
+            orders.append(Order(
+                order_id=order_id,
+                platform=self.shop.platform,
+                shop_id=self.shop.shop_id,
+                shop_name=self.shop.display_name,
+                order_created_at=m.parse_dt(m.get(row, "order_created_at")),
+                order_updated_at=m.parse_dt(m.get(row, "delivered_at"))
+                                 or m.parse_dt(m.get(row, "shipped_at")),
+                paid_at=m.parse_dt(m.get(row, "paid_at")),
+                status_raw=str(status_raw) if status_raw is not None else None,
+                order_status=m.map_status(status_key),
+                payment_method=m.get(row, "payment_method"),
+                sku=m.to_text(m.get(row, "sku")),
+                product_name=m.get(row, "product_name"),
+                variation=m.get(row, "variation"),
+                quantity=int(m.to_float(m.get(row, "quantity")) or 0) or None,
+                item_price=m.to_float(m.get(row, "item_price")),
+                seller_discount=m.to_float(m.get(row, "seller_discount")),
+                platform_discount=m.to_float(m.get(row, "platform_discount")),
+                shipping_fee=m.to_float(m.get(row, "shipping_fee")),
+                shipping_carrier=m.get(row, "shipping_carrier"),
+                tracking_no=m.to_text(m.get(row, "tracking_no")),
+                total_amount=m.to_float(m.get(row, "total_amount")),
+                buyer_username=m.get(row, "buyer_username"),
+                province=province,               # Shopee ไม่ mask จังหวัด ใช้ได้เลย
+                cancel_reason=m.get(row, "cancel_reason"),
+                return_status=m.to_text(m.get(row, "return_status")),
+                notes=" / ".join(notes),
+                fetched_at=datetime.now(),
+            ))
+        return orders

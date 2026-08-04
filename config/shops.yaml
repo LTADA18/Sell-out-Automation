@@ -78,11 +78,11 @@ shops:
 
   - shop_id: shopee_02
     platform: shopee
-    adapter: mock
+    adapter: playwright
     display_name: "Smarttooltech"
+    web_shop_name: "Smarttooltech"
     account_key: SHOPEE_02
-    enabled: false
-    skip_reason: "รอขั้นตอน Export ของ Shopee (ยังไม่มี column map)"
+    enabled: true
 
   # ⚠️ บัญชี tnltools:setadosuka ดูแล 2 ร้าน (Toolspartner + TNLTOOLSTORE)
   #    Shopee มีหน้า /portal/shop "เลือกร้านที่จะจัดการ" คั่นหลังล็อกอิน
