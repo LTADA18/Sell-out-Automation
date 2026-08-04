@@ -125,7 +125,21 @@ class LazadaAdapter(PlaywrightAdapter):
             return False
         log.info("relogin_form_prefilled", shop_id=self.shop.shop_id, pw_len=filled)
 
-        if not _click_first(page, SEL["login_btn"], 8000):
+        # ⚠️ ห้ามใช้ button:text-is("เข้าสู่ระบบ") — ปุ่มมี <span> ซ้อนข้างใน
+        #    :text-is เทียบข้อความของ element ตัวเอง จึงไม่แมตช์ (เจอจริง 2026-08-04)
+        #    get_by_role ดูจาก accessible name จึงกดติด — วิธีเดียวกับที่กดด้วยมือแล้วผ่าน
+        #    exact=True สำคัญ ไม่งั้นไปโดน "เข้าสู่ระบบด้วย OTP" ที่อยู่ใต้กันพอดี
+        clicked = False
+        for name in ("เข้าสู่ระบบ", "Login", "Sign in"):
+            try:
+                btn = page.get_by_role("button", name=name, exact=True).first
+                btn.wait_for(state="visible", timeout=6000)
+                btn.click(timeout=8000)
+                clicked = True
+                break
+            except Exception:                            # noqa: BLE001
+                continue
+        if not clicked and not _click_first(page, SEL["login_btn"], 6000):
             log.warning("relogin_button_missing", shop_id=self.shop.shop_id)
             return False
 
