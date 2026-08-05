@@ -127,36 +127,15 @@ shops:
     account_key: SHOPEE_06
     enabled: true
 
-  # ⚠️ บัญชี YM_SP:Osuka ดูแล 3 ร้าน — ใช้ profile_key เดียวกันทั้งหมด
-  #    ตอนแรกใน shops.yaml มีแค่ "ยงเฮ้าส์ (Mall)" ร้านเดียว
-  #    ตรวจหน้าเลือกร้านจริงแล้วเจอ 3 ร้าน จึงแตกออกมาให้ครบ
-  #    web_shop_name ต้องตรงกับที่โชว์บนหน้าเว็บเป๊ะ ๆ ถึงจะกดถูกแถว
-  - shop_id: shopee_07
-    platform: shopee
-    adapter: playwright
-    display_name: "Yonghouse Official Store"      # ตัว Mall (Shopee เรียก Official Store)
-    web_shop_name: "Yonghouse Official Store"
-    profile_key: shopee_07
-    account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
-
-  - shop_id: shopee_09
-    platform: shopee
-    adapter: playwright
-    display_name: "Yong House ยงเฮ้าส์"
-    web_shop_name: "Yong House ยงเฮ้าส์"
-    profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
-    account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
-
-  - shop_id: shopee_10
-    platform: shopee
-    adapter: playwright
-    display_name: "บ้านช่าง Baanchang"
-    web_shop_name: "บ้านช่าง Baanchang"
-    profile_key: shopee_07          # ใช้ session เดียวกับ Yonghouse Official Store
-    account_key: SHOPEE_07
-    enabled: false
-    skip_reason: "บัญชี YM_SP:Osuka ไม่มีสิทธิ์เข้าหน้าคำสั่งซื้อ — รอเจ้าของร้านเพิ่มสิทธิ์"
+  # ── เอาออกแล้ว 2026-08-05 — เจ้าของร้านไม่ยินยอมให้ดึงข้อมูล ──────────
+  #
+  # shopee_07  Yonghouse Official Store
+  # shopee_09  Yong House ยงเฮ้าส์
+  # shopee_10  บ้านช่าง Baanchang
+  #
+  # ทั้ง 3 ร้านอยู่ใต้บัญชี YM_SP:Osuka (ใช้ profile_key เดียวกัน)
+  # เจ้าของงานคุยกับทางร้านแล้ว ทางร้านไม่ต้องการให้เราดึงข้อมูล
+  #
+  # ⚠️ ต่างจากร้านที่ตั้ง enabled: false ตรงที่อันนั้นคือ "ติดปัญหาเทคนิค รอแก้"
+  #    แต่ 3 ร้านนี้คือ "ไม่ได้รับความยินยอม" — ห้ามเปิดกลับเองเด็ดขาด
+  #    ถ้าวันหนึ่งทางร้านอนุญาต ต้องได้รับการยืนยันจากเจ้าของงานก่อนเท่านั้น
