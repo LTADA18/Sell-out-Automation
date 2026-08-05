@@ -47,7 +47,9 @@ SEL = {
     "onboarding": ["div.onboarding-masked"],
 }
 
-ONBOARD_CLOSE = ("ตกลง", "ต่อไป", "ข้าม", "เข้าใจแล้ว", "Got it", "Next")
+# "ยืนยัน" มาจากกล่องทัวร์ "ดูคำสั่งซื้อที่ตรงกัน (2/2)" ที่เจอจริงกับ shopee_01
+# เมื่อ 2026-08-05 — ไม่มีในลิสต์เดิมจึงปิดกล่องนั้นไม่ได้
+ONBOARD_CLOSE = ("ตกลง", "ต่อไป", "ข้าม", "เข้าใจแล้ว", "ยืนยัน", "Got it", "Next")
 
 
 def _click_first(page, keys: list[str], timeout: int = 8000) -> bool:
@@ -194,11 +196,63 @@ class ShopeeAdapter(PlaywrightAdapter):
                 log.info("onboarding_removed", shop_id=self.shop.shop_id)
                 return
 
+    def _clear_overlay_over(self, page, sel: str) -> str:
+        """ซ่อนสิ่งที่ลอยทับปุ่มอยู่ คืนผลลัพธ์ไว้ log
+
+        ⚠️ Shopee เด้งป๊อปอัปโฆษณามุมขวาบนเป็นครั้งคราว ("เพิ่ม Discovery ROI...")
+           ทับปุ่ม "ดาวน์โหลด" พอดีเป๊ะ Playwright จึงคลิกไม่ได้เพราะปุ่มไม่รับ
+           pointer event แล้วรายงานว่า "หาปุ่มไม่เจอ" ทั้งที่ปุ่มอยู่ตรงนั้น
+           (เจอจริง 2026-08-05 กับ shopee_01 และ shopee_05 — diag ยืนยันว่า
+            ปุ่ม visible=True enabled=True ตำแหน่ง x=912 y=94 แต่คลิกไม่ผ่าน)
+
+           ปิดด้วยปุ่มกากบาทไม่ได้เพราะ class ของป๊อปอัปไม่แน่นอนและขึ้นแบบสุ่ม
+           จึงใช้ elementFromPoint ถามตรง ๆ ว่าตอนนี้ "อะไรอยู่บนสุด" ตรงกลางปุ่ม
+           ถ้าไม่ใช่ปุ่มเอง = มีของทับ ให้ซ่อนตัวนั้นทิ้ง
+        """
+        js = """
+        (sel) => {
+          const btn = document.querySelector(sel);
+          if (!btn) return 'no-button';
+          const r = btn.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          if (!top || btn.contains(top) || top.contains(btn)) return 'clear';
+          let el = top;
+          for (let i = 0; i < 6 && el && el !== document.body; i++) {
+            const cs = getComputedStyle(el);
+            if (cs.position === 'fixed' || cs.position === 'absolute') {
+              el.style.display = 'none';
+              return 'hidden:' + (el.className || '').toString().slice(0, 60);
+            }
+            el = el.parentElement;
+          }
+          top.style.display = 'none';
+          return 'hidden-fallback';
+        }
+        """
+        try:
+            res = str(page.evaluate(js, sel))
+        except Exception:                                # noqa: BLE001
+            return "eval-failed"
+        if res.startswith("hidden"):
+            log.info("shopee_overlay_cleared", shop_id=self.shop.shop_id, detail=res[:80])
+            page.wait_for_timeout(600)
+        return res
+
     def _do_export(self, page, date_from: date, date_to: date) -> Path:
         before = self._report_names(page)
 
+        self._clear_overlay_over(page, SEL["open_modal"][0])
         if not _click_first(page, SEL["open_modal"], 15000):
-            raise AdapterError(ErrorType.PARSE_ERROR, 'หาปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่เจอ')
+            # คลิกไม่ผ่านมัก = มีของลอยทับ ไม่ใช่ปุ่มหาย — เคลียร์แล้วลองอีกครั้ง
+            self._dismiss_onboarding(page)
+            state = self._clear_overlay_over(page, SEL["open_modal"][0])
+            if not _click_first(page, SEL["open_modal"], 10000):
+                self._screenshot_on_error(page, "open_modal_blocked")
+                raise AdapterError(
+                    ErrorType.PARSE_ERROR,
+                    f'กดปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่ได้ — สถานะสิ่งที่ทับ: {state} '
+                    f"— ดูภาพหน้าจอใน logs/screenshots/",
+                )
         page.wait_for_timeout(3000)
 
         self._set_range(page, date_from, date_to)
