@@ -285,11 +285,21 @@ def collect_shop(adapter, page, shop_id: str, st: dict) -> int:
     return got
 
 
+def collected_in_scope(st: dict) -> int:
+    """นับเฉพาะไฟล์ของร้านที่กำลังทำอยู่รอบนี้
+
+    ⚠️ ห้ามใช้ len(st["collected"]) ตรง ๆ — มันนับรวมทุกร้านที่เคยเก็บมาทั้งหมด
+       ตอนรันเฉพาะ 2 ร้าน (เป้า 14) แต่ของเก่ามีอยู่ 28 ไฟล์ จะเข้าเงื่อนไข 28 >= 14
+       แล้วออกจากลูปทันทีโดยไม่เก็บอะไรเลย (เจอจริง 2026-08-05 กับ shopee_03/08)
+    """
+    return sum(1 for k in st["collected"] if k.split("|")[0] in SHOP_IDS)
+
+
 def phase_collect(cfg, st: dict, rounds: int, wait_min: int) -> None:
     print("\n===== เฟส 2: เก็บไฟล์ =====", flush=True)
     total_want = len(SHOP_IDS) * len(PERIODS)
     for rnd in range(1, rounds + 1):
-        have = len(st["collected"])
+        have = collected_in_scope(st)
         if have >= total_want:
             break
         print(f"\n--- รอบที่ {rnd} (ได้แล้ว {have}/{total_want}) ---", flush=True)
@@ -308,7 +318,7 @@ def phase_collect(cfg, st: dict, rounds: int, wait_min: int) -> None:
                 adapter.close()
             time.sleep(3)
 
-        have = len(st["collected"])
+        have = collected_in_scope(st)
         if have >= total_want:
             break
         if rnd < rounds:
@@ -383,7 +393,7 @@ def main() -> int:
     ap.add_argument("--phase", choices=["request", "collect", "merge", "all"], default="all")
     ap.add_argument("--rounds", type=int, default=8, help="เฟสเก็บ วนกี่รอบ")
     ap.add_argument("--wait", type=int, default=12, help="เฟสเก็บ รอกี่นาทีระหว่างรอบ")
-    ap.add_argument("--only-shop", help="ทดสอบร้านเดียว")
+    ap.add_argument("--only-shop", help="จำกัดเฉพาะร้านที่ระบุ คั่นหลายร้านด้วย ,")
     ap.add_argument("--only-month", type=int, help="ทดสอบเดือนเดียว (1-7)")
     args = ap.parse_args()
 
@@ -391,7 +401,7 @@ def main() -> int:
     # ไม่ต้องรอเป็นชั่วโมงแล้วมาพบว่าพังตั้งแต่เดือนแรก
     global SHOP_IDS, PERIODS
     if args.only_shop:
-        SHOP_IDS = [args.only_shop]
+        SHOP_IDS = [s.strip() for s in args.only_shop.split(",") if s.strip()]
     if args.only_month:
         PERIODS = [PERIODS[args.only_month - 1]]
 

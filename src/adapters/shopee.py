@@ -143,9 +143,18 @@ class ShopeeAdapter(PlaywrightAdapter):
                 return                                   # อยู่ถูกร้านแล้ว
             log.info("shopee_wrong_shop_open", shop_id=self.shop.shop_id,
                      current=current, want=want)
-            page.goto(f"{self.base_url}/portal/shop?next=%2Fportal%2Fsale%2Forder",
-                      wait_until="domcontentloaded")
-            page.wait_for_timeout(8000)
+
+            # ⚠️ ต้องไป /portal/shop "เปล่า ๆ" ห้ามใส่ ?next=
+            #    ถ้าใส่ next= Shopee เห็นว่ามีร้านเปิดอยู่แล้วจะข้ามหน้าเลือกร้าน
+            #    พาไปที่ next ทันที = สลับร้านไม่ได้เลย ติดที่ร้านเดิมตลอด
+            #    (เจอจริง 2026-08-05 กับ shopee_08 — diag ยืนยันว่าตัดออกแล้วเข้าได้)
+            #    ตัวเลือกสำรองยังคง ?next= ไว้เผื่อ Shopee เปลี่ยนพฤติกรรมอีก
+            for url in (f"{self.base_url}/portal/shop",
+                        f"{self.base_url}/portal/shop?next=%2Fportal%2Fsale%2Forder"):
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_timeout(8000)
+                if "/portal/shop" in page.url:
+                    break
             if "/portal/shop" not in page.url:
                 raise AdapterError(
                     ErrorType.PARSE_ERROR,

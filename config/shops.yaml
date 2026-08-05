@@ -93,8 +93,7 @@ shops:
     web_shop_name: "Toolspartner"
     profile_key: shopee_03
     account_key: SHOPEE_03
-    enabled: false
-    skip_reason: "ร้านนี้ไม่มีปุ่ม Export ในหลังบ้าน (ยืนยันด้วยตาแล้ว 2026-08-04)"
+    enabled: true                   # เปิดกลับ 2026-08-05 — เจ้าของร้านเปิดสิทธิ์ดาวน์โหลดให้แล้ว
 
   - shop_id: shopee_08
     platform: shopee
@@ -103,8 +102,7 @@ shops:
     web_shop_name: "TNLTOOLSTORE"
     profile_key: shopee_03          # ใช้ session เดียวกับ Toolspartner
     account_key: SHOPEE_03
-    enabled: false
-    skip_reason: "ร้านนี้ไม่มีปุ่ม Export ในหลังบ้าน (ยืนยันด้วยตาแล้ว 2026-08-04)"
+    enabled: true                   # เปิดกลับ 2026-08-05 — เจ้าของร้านเปิดสิทธิ์ดาวน์โหลดให้แล้ว
 
   - shop_id: shopee_04
     platform: shopee
