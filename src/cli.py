@@ -13,7 +13,8 @@ from src.core.config import PROJECT_ROOT, load_config
 from src.core import mailer
 from src.core.dashboard import build as build_dashboard
 from src.core.logging_setup import setup_logging
-from src.core.runner import AlreadyRunningError, Runner, run_lock, summarize
+from src.core.runner import (AlreadyRunningError, Runner, date_range, run_lock,
+                             summarize)
 from src.core.status_store import StatusStore
 
 DATE_FMT = "%Y-%m-%d"
@@ -236,8 +237,12 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
               .GetNamespace("MAPI").Accounts.Item(1).SmtpAddress]
         click.echo(f"(โหมดทดสอบ) ส่งหาตัวเอง: {to[0]}")
 
-    subject = mailer.build_subject(run_date, rows)
-    html = mailer.build_html(run_date, rows)
+    # ⚠️ เอาช่วงวันที่มาจาก date_range() ตัวเดียวกับที่ runner ใช้ดึงจริง
+    #    ห้ามคำนวณ run_date - 1 วันเองในนี้ เพราะถ้า lookback_days เปลี่ยน
+    #    อีเมลจะติดป้ายวันที่ผิดโดยไม่มีอะไรเตือน
+    d_from, d_to = date_range(cfg, date.fromisoformat(run_date))
+    subject = mailer.build_subject(run_date, rows, d_from.isoformat(), d_to.isoformat())
+    html = mailer.build_html(run_date, rows, d_from.isoformat(), d_to.isoformat())
     sender = mailer.send(subject, html, to, cc, attachments, send_now=not draft)
 
     if not draft:

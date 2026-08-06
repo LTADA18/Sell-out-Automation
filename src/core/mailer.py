@@ -47,16 +47,48 @@ def read_rows(db_path: Path, run_date: str | None = None) -> tuple[str, list[dic
     return run_date, rows
 
 
-def build_subject(run_date: str, rows: list[dict]) -> str:
+TH_MONTH_ABBR = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                 "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+
+
+def data_period(data_from: str | None, data_to: str | None) -> str:
+    """ข้อความบอกว่าเป็นยอดของวันไหน เช่น '5 ส.ค. 2026' หรือ '3–5 ส.ค. 2026'
+
+    ⚠️ ต้องรับช่วงวันที่มาจากคนเรียก ห้ามคำนวณเอาเองจาก run_date ลบหนึ่งวัน
+       เพราะ lookback_days ปรับได้ใน settings.yaml ถ้าวันไหนตั้งเป็น 2 วัน
+       สูตรลบหนึ่งจะติดป้ายวันที่ผิดทันทีโดยไม่มีอะไรเตือน
+       ซึ่งแย่กว่าไม่บอกวันที่เลย
+    """
+    if not data_to:
+        return ""
+    try:
+        d2 = date.fromisoformat(data_to)
+        d1 = date.fromisoformat(data_from) if data_from else d2
+    except ValueError:
+        return ""
+    if d1 == d2:
+        return f"{d2.day} {TH_MONTH_ABBR[d2.month - 1]} {d2.year}"
+    if (d1.month, d1.year) == (d2.month, d2.year):
+        return f"{d1.day}–{d2.day} {TH_MONTH_ABBR[d2.month - 1]} {d2.year}"
+    return (f"{d1.day} {TH_MONTH_ABBR[d1.month - 1]} – "
+            f"{d2.day} {TH_MONTH_ABBR[d2.month - 1]} {d2.year}")
+
+
+def build_subject(run_date: str, rows: list[dict],
+                  data_from: str | None = None, data_to: str | None = None) -> str:
     n_ok = sum(1 for r in rows if r["status"] == RunStatus.SUCCESS.value)
     n_bad = sum(1 for r in rows if r["status"] == RunStatus.FAILED.value)
     orders = sum(r["orders_fetched"] or 0 for r in rows)
     head = "⚠️ " if n_bad else ""
     tail = f" · ต้องแก้ {n_bad} ร้าน" if n_bad else ""
-    return f"{head}ยอดคำสั่งซื้อ {run_date} — {n_ok}/{len(rows)} ร้าน · {orders:,} ออเดอร์{tail}"
+    # เอาวันของ "ข้อมูล" ขึ้นก่อนเสมอ ไม่ใช่วันที่ส่ง — คนอ่านหัวข้อแล้วต้องรู้ทันที
+    period = data_period(data_from, data_to)
+    what = f"ยอดขายวันที่ {period}" if period else f"ยอดคำสั่งซื้อ {run_date}"
+    return f"{head}{what} — {n_ok}/{len(rows)} ร้าน · {orders:,} ออเดอร์{tail}"
 
 
-def build_html(run_date: str, rows: list[dict]) -> str:
+def build_html(run_date: str, rows: list[dict],
+               data_from: str | None = None, data_to: str | None = None) -> str:
     """ตารางสรุปฝังในเนื้ออีเมล — เปิดแล้วเห็นเลยไม่ต้องกดไฟล์แนบ
 
     ใช้ inline style ทั้งหมด เพราะ Outlook ตัด <style> ใน <head> ทิ้ง
@@ -98,12 +130,20 @@ def build_html(run_date: str, rows: list[dict]) -> str:
             f'margin:0 0 18px">ต้องลงมือแก้ <b>{n_bad} ร้าน</b>: {names}</p>'
         )
 
+    # แยกให้ชัดว่า "ยอดของวันไหน" กับ "ดึงเมื่อไหร่" คนละวันกัน
+    # ไม่งั้นคนอ่านจะเข้าใจว่าเป็นยอดของวันที่ได้รับอีเมล
+    period = data_period(data_from, data_to)
+    heading = f"ยอดขายวันที่ {period}" if period else f"ยอดคำสั่งซื้อประจำวัน {run_date}"
+    when = (f'<br>ข้อมูลของวันที่ <b>{period}</b> · ดึงเมื่อ {run_date}'
+            if period else "")
+
     return f"""<div style="font-family:'Segoe UI',sans-serif;font-size:14px;color:#1b1f24">
-<h2 style="margin:0 0 4px">ยอดคำสั่งซื้อประจำวัน {run_date}</h2>
+<h2 style="margin:0 0 4px">{heading}</h2>
 <p style="color:#697280;margin:0 0 18px">
   ดึงสำเร็จ <b>{n_ok}</b> ร้าน · รวม <b>{total_orders:,}</b> ออเดอร์
   {f"· ล้มเหลว {n_bad}" if n_bad else ""}{f" · ข้าม {n_skip}" if n_skip else ""}
-  <br>สร้างเมื่อ {datetime.now():%Y-%m-%d %H:%M:%S}
+  {when}
+  <br>สร้างอีเมลเมื่อ {datetime.now():%Y-%m-%d %H:%M:%S}
 </p>
 {alert}
 <table style="border-collapse:collapse;font-size:13px">
