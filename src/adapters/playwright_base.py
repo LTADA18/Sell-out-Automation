@@ -388,14 +388,28 @@ class PlaywrightAdapter(BaseAdapter):
 
         deadline = time.time() + wait_minutes * 60
         ok = False
+        last_seen = ""
         while time.time() < deadline:
+            # ⚠️ ต้องดู "ทุกแท็บ" ไม่ใช่แท็บเดียวที่จับไว้ตอนเปิด
+            #    การล็อกอินมักเปิดแท็บใหม่หรือ redirect ข้ามโดเมน
+            #    (Shopee: หน้า login อยู่ accounts.shopee.co.th คนละโดเมนกับ seller.)
+            #    เวอร์ชันแรกอ่านแค่ page.url ของแท็บเดิม + บังคับว่าต้องขึ้นต้นด้วย
+            #    base_url ผลคือผู้ใช้ล็อกอินสำเร็จแล้วแต่ระบบรอเก้อจนหมดเวลา
+            #    (เจอจริง 2026-08-06 ต้องให้ผู้ใช้ล็อกอินซ้ำหลายรอบ)
             try:
-                url = page.url
+                urls = [p.url for p in self._context.pages if p.url.startswith("http")]
             except Exception:                            # noqa: BLE001
                 print("  หน้าต่างถูกปิดก่อนล็อกอินเสร็จ — ยังไม่ได้เซฟอะไร")
                 return False
-            if url.startswith(self.base_url) and not any(
-                    h in url.lower() for h in LOGIN_URL_HINTS):
+
+            if urls and str(urls) != last_seen:
+                last_seen = str(urls)
+                log.info("login_watch", shop_id=self.shop.shop_id,
+                         urls=[u[:70] for u in urls])
+
+            # เข้าเงื่อนไขเมื่อ "ไม่มีแท็บไหนเป็นหน้า login แล้ว" — ไม่ยึดโดเมน
+            if urls and not any(
+                    any(h in u.lower() for h in LOGIN_URL_HINTS) for u in urls):
                 ok = True
                 break
             time.sleep(3)
@@ -405,7 +419,7 @@ class PlaywrightAdapter(BaseAdapter):
             self.close()
             return False
 
-        print(f"  ✅ เข้าหลังบ้านได้แล้ว ({page.url[:70]})")
+        print(f"  ✅ เข้าหลังบ้านได้แล้ว ({last_seen[:90]})")
         page.wait_for_timeout(3000)
         self._save_session()
         # เซฟซ้ำอีกรอบ — บางเจ้าตั้ง cookie เพิ่มหลัง redirect รอบสอง
