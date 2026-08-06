@@ -13,7 +13,8 @@
 param(
     [string]$Date,
     [string]$To = "Pitchaya.L@imaxpowertool.com",
-    [string]$Cc = "Natcha.S@imaxpowertool.com",
+    # สำเนาถึง — คั่นด้วย , (เพิ่ม 3 คนตามที่เจ้าของงานสั่ง 2026-08-06)
+    [string]$Cc = "Natcha.S@imaxpowertool.com,Tanapoom.S@imaxpowertool.com,panupun.s@imaxpowertool.com,Narissa.W@imaxpowertool.com",
     [switch]$NoExcel,
     [switch]$Draft,
     # กันส่งซ้ำ — ถ้ารอบดึงส่งอีเมลของวันนี้ไปแล้ว ให้ออกทันที

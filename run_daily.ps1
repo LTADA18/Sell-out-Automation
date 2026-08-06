@@ -17,7 +17,8 @@ param(
     #  ถ้าตั้งอีเมลตามนาฬิกาจะส่งตอนข้อมูลยังไม่ครบ)
     [switch]$Mail,
     [string]$MailTo = "Pitchaya.L@imaxpowertool.com",
-    [string]$MailCc = "Natcha.S@imaxpowertool.com"
+    # สำเนาถึง — คั่นด้วย , (เพิ่ม 3 คนตามที่เจ้าของงานสั่ง 2026-08-06)
+    [string]$MailCc = "Natcha.S@imaxpowertool.com,Tanapoom.S@imaxpowertool.com,panupun.s@imaxpowertool.com,Narissa.W@imaxpowertool.com"
 )
 
 $ErrorActionPreference = "Stop"
