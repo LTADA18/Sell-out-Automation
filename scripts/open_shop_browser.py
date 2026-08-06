@@ -30,6 +30,20 @@ from src.core.config import load_config                  # noqa: E402
 DL_DIR = PROJECT_ROOT / "output" / "_manual_downloads"
 MAX_MINUTES = 120
 
+# หน้าคำสั่งซื้อของแต่ละเจ้า — Shopee มี property orders_url ให้อยู่แล้ว
+# อีก 2 เจ้าไม่มี ต้องประกาศเอง (เอามาจาก _export ของ adapter แต่ละตัว)
+ORDERS_PATH = {
+    "tiktok": "/order",
+    "lazada": "/apps/order/list?oldVersion=1",
+}
+
+
+def orders_url(adapter, platform: str) -> str:
+    url = getattr(adapter, "orders_url", None)
+    if url:
+        return url
+    return f"{adapter.base_url}{ORDERS_PATH.get(platform, '/')}"
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -64,20 +78,22 @@ def main() -> int:
         adapter._context.on("page", wire)                # แท็บใหม่ก็ดักด้วย
         wire(page)
 
-        page.goto(adapter.orders_url, wait_until="domcontentloaded")
+        page.goto(orders_url(adapter, s.platform), wait_until="domcontentloaded")
         page.wait_for_timeout(8000)
 
-        # ข้ามหน้า "เลือกร้านที่จะจัดการ" ให้เอง — 1 บัญชีดูแลหลายร้าน
+        # ข้ามหน้า "เลือกร้านที่จะจัดการ" ให้เอง — เฉพาะ Shopee ที่ 1 บัญชีดูแลหลายร้าน
         # ถ้าเลือกผิดร้านจะได้ข้อมูลผิดโดยไม่มีอะไรเตือน
-        try:
-            adapter._enter_shop(page)
-            adapter._dismiss_onboarding(page)
-        except Exception as exc:                         # noqa: BLE001
-            print(f"  (ข้ามขั้นเลือกร้านไม่สำเร็จ ทำเองในหน้าต่างได้: {exc})")
+        # แพลตฟอร์มอื่นไม่มีหน้านี้ จึงข้ามไป
+        if hasattr(adapter, "_enter_shop"):
+            try:
+                adapter._enter_shop(page)
+                adapter._dismiss_onboarding(page)
+            except Exception as exc:                     # noqa: BLE001
+                print(f"  (ข้ามขั้นเลือกร้านไม่สำเร็จ ทำเองในหน้าต่างได้: {exc})")
 
         print()
         print(f"  ร้าน  : {s.display_name} ({s.shop_id})")
-        print(f"  หน้า  : {adapter.orders_url}")
+        print(f"  หน้า  : {orders_url(adapter, s.platform)}")
         print()
         print("  กด 'ดาวน์โหลด' → เลือกช่วง 1/1/2026 – 31/7/2026 → ยืนยัน")
         print("  ไฟล์จะไปอยู่ใน ประวัติการดาวน์โหลด รอสักพักแล้วกดโหลด")

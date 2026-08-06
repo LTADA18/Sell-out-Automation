@@ -1,0 +1,41 @@
+# จับกลุ่มร้านเป็น "แบรนด์" สำหรับรายงานย้อนหลัง
+#
+# ร้านเดียวกันขายหลายแพลตฟอร์ม แต่ชื่อร้านบนแต่ละเจ้าสะกดไม่เหมือนกันเป๊ะ
+# จับกลุ่มอัตโนมัติด้วยชื่อจึงพลาดได้ ไฟล์นี้จึงประกาศไว้ให้ชัดเจน
+#
+# ⚠️ ห้ามเดาเอาเองว่าร้านไหนเป็นแบรนด์เดียวกัน — ต้องได้รับการยืนยันจากเจ้าของงาน
+#    ถ้ารวมผิด ยอดขายของคนละร้านจะถูกบวกรวมกันโดยไม่มีอะไรเตือน
+#
+# ที่มา: เจ้าของงานยืนยัน 2026-08-06 ว่า powerstool (TikTok) กับ
+#        Powerstools (Shopee) เป็นร้านเดียวกัน
+
+brands:
+  - name: "กัปตัน เอกสตีล"
+    shops: [lazada_01, shopee_06]
+
+  - name: "Powerstools"
+    shops: [tiktok_01, shopee_04]     # ชื่อบน TikTok สะกด powerstool ไม่มี s
+
+  - name: "เฮียเก๋า เครื่องมือช่างราคาถูก"
+    shops: [tiktok_05, shopee_05]
+
+  - name: "toolsdee1"
+    shops: [tiktok_02]
+
+  - name: "ฝ้ายการช่าง"
+    shops: [tiktok_03]
+
+  - name: "100อัน1000อย่าง88"
+    shops: [tiktok_04]
+
+  - name: "เฮียคิมคลองถม"
+    shops: [shopee_01]
+
+  - name: "Smarttooltech"
+    shops: [shopee_02]
+
+  - name: "Toolspartner"
+    shops: [shopee_03]
+
+  - name: "TNLTOOLSTORE"
+    shops: [shopee_08]

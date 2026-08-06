@@ -33,17 +33,26 @@ SEL = {
     "open_modal": ["button.export-with-modal"],
     # ปุ่มยืนยันในกล่อง (สีแดง = primary) คนละตัวกับปุ่มเปิด
     "confirm": ['.eds-modal__box button.eds-button--primary:has-text("ดาวน์โหลด")',
-                'button.eds-button--primary:has-text("ดาวน์โหลด")'],
+                '.eds-modal__box button.eds-button--primary:has-text("Download")',
+                'button.eds-button--primary:has-text("ดาวน์โหลด")',
+                'button.eds-button--primary:has-text("Download")'],
     # ⚠️ ช่องช่วงเวลาเป็น <div> ไม่ใช่ <input> — หา input จะไม่เจอ
     "range_input": [".eds-date-picker__input"],
     "picker_panel": [".eds-daterange-picker-panel"],
     "month_label": [".eds-picker-header__label"],
     "prev_month": [".eds-picker-header__prev"],
-    "history_btn": ['button:has-text("ประวัติการดาวน์โหลด")'],
+    # ⚠️ หลังบ้าน Shopee ตั้งภาษาได้รายร้าน — shopee_08 เป็นอังกฤษ ร้านอื่นเป็นไทย
+    #    ถ้าใส่แต่ข้อความไทย ร้านที่ตั้งอังกฤษจะหาปุ่มไม่เจอแล้วค้างจนหมดเวลา 60 วิ
+    #    (เจอจริง 2026-08-06: shopee_08 สั่งไฟล์ได้ครบ 7 เดือนเพราะปุ่มนั้นเล็งด้วย
+    #     class แต่เก็บไฟล์ไม่ได้เลยเพราะปุ่มประวัติเล็งด้วยข้อความไทย)
+    "history_btn": ['button:has-text("ประวัติการดาวน์โหลด")',
+                    'button:has-text("Export History")'],
     # แถวในประวัติ ชื่อไฟล์ขึ้นต้นด้วย Order. เสมอ
     "report_rows": ['text=/Order\\.[\\w.]+\\.\\d{8}_\\d{8}\\.(xlsx|zip|csv)/'],
     "row_download": ['button.eds-button--primary:has-text("ดาวน์โหลด")',
-                     'button:has-text("ดาวน์โหลด")'],
+                     'button.eds-button--primary:has-text("Download")',
+                     'button:has-text("ดาวน์โหลด")',
+                     'button:has-text("Download")'],
     "onboarding": ["div.onboarding-masked"],
 }
 
@@ -175,7 +184,19 @@ class ShopeeAdapter(PlaywrightAdapter):
                 f"(แก้ web_shop_name ใน shops.yaml ให้ตรงกับชื่อบนเว็บ)",
             )
 
-        row.locator('button:has-text("รายละเอียด")').first.click()
+        # ⚠️ ปุ่มในแถวเป็น "รายละเอียด" (ไทย) หรือ "Details" (อังกฤษ) แล้วแต่ภาษาของร้าน
+        #    ถ้าใส่แต่ไทย ร้านที่ตั้งอังกฤษจะค้างรอ 60 วินาทีแล้วโยน Timeout
+        #    (เจอจริง 2026-08-07 กับบัญชี tnltools ที่หน้าเป็น "Choose a Shop to Manage")
+        for sel in ('button:has-text("รายละเอียด")', 'button:has-text("Details")'):
+            btn = row.locator(sel).first
+            if btn.count():
+                btn.click()
+                break
+        else:
+            raise AdapterError(
+                ErrorType.PARSE_ERROR,
+                f'เจอแถวของร้าน {want!r} แล้วแต่ไม่มีปุ่ม "รายละเอียด"/"Details"',
+            )
         page.wait_for_timeout(8000)
         log.info("shopee_shop_selected", shop_id=self.shop.shop_id, web_name=want)
 

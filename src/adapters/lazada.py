@@ -278,9 +278,41 @@ class LazadaAdapter(PlaywrightAdapter):
             if exc.error_type is not ErrorType.TIMEOUT:
                 raise
             log.warning("auto_download_missed", shop_id=self.shop.shop_id)
+            self._wait_download_link(page)
             return self._capture_download(
                 page, lambda: _click_first(page, SEL["download_link"], 20000), 120_000
             )
+
+    def _wait_download_link(self, page, timeout_sec: int = 900) -> None:
+        """รอจนลิงก์ "ดาวน์โหลดไฟล์" โผล่ในกล่องผลลัพธ์
+
+        ⚠️ Lazada ปั่นไฟล์แบบไม่ส่งกลับมาทันทีเมื่อข้อมูลเยอะ
+           กล่อง "ข้อมูลการส่งออก" จะขึ้นวงกลมความคืบหน้า (เห็นค้างที่ 80%)
+           พร้อมข้อความ "งานที่ได้รับการสร้างขึ้นโปรดรอสักครู่..."
+           ลิงก์ดาวน์โหลดจะโผล่ก็ต่อเมื่อปั่นเสร็จ 100%
+
+           รอบรายวันไฟล์เล็ก เสร็จในไม่กี่วินาที จึงไม่เคยเจอปัญหานี้
+           แต่ดึงย้อนหลังรายเดือน (35,713 รายการ) ใช้เวลานานกว่ามาก
+           ของเดิมรอแค่ 120 วินาทีแล้วยอมแพ้ → ล้มเหลว 7/7 เดือน (2026-08-06)
+
+           ตรงนี้แค่ "รอให้ลิงก์โผล่" ไม่ได้กดอะไร ถ้าครบเวลาแล้วยังไม่มา
+           ก็ปล่อยให้ _capture_download ด้านล่างรายงาน TIMEOUT ตามเดิม
+        """
+        import time as _t
+
+        deadline = _t.time() + timeout_sec
+        while _t.time() < deadline:
+            for sel in SEL["download_link"]:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=1500):
+                        log.info("lazada_export_ready", shop_id=self.shop.shop_id,
+                                 waited_sec=int(timeout_sec - (deadline - _t.time())))
+                        return
+                except Exception:                        # noqa: BLE001
+                    continue
+            page.wait_for_timeout(5000)
+        log.warning("lazada_export_still_building", shop_id=self.shop.shop_id,
+                    waited_sec=timeout_sec)
 
     # ── แปลงเป็น schema กลาง ─────────────────────────────────
 
