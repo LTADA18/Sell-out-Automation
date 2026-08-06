@@ -97,12 +97,17 @@ $action = New-ScheduledTaskAction `
     -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -SkipIfDone -Mail" `
     -WorkingDirectory $PSScriptRoot
 
-# trigger 1: ทุกวันตามเวลาที่ตั้ง
-# trigger 2: ตอนล็อกอิน — เผื่อคืนนั้นเครื่องปิดอยู่ จะได้ตามเก็บให้ตอนเปิดเครื่อง
-#            (-SkipIfDone กันไม่ให้ดึงซ้ำถ้ารอบเช้าวิ่งไปแล้ว)
+# ⛔ เคยมี trigger ตอนล็อกอินด้วย — ถอดออกแล้ว 2026-08-06
+#    เจตนาเดิมคือเผื่อคืนนั้นเครื่องปิด จะได้ตามเก็บตอนเปิดเครื่อง
+#    แต่ของจริงคือมัน "ตายทุกครั้ง" เพราะยิงตอน session Windows ยังตั้งตัวไม่เสร็จ
+#      5 ส.ค. 08:17 ยิง -> ตาย (รหัส 3221225786 = ถูกสั่งหยุด)
+#      6 ส.ค. 08:18 ยิง -> ตาย + ทิ้ง run.lock ค้างไว้
+#    ครั้งหลังร้ายกว่าเพราะ run.lock ที่ค้างจะบล็อกรอบจริงตอน 08:30 (exit 2)
+#    แล้วเงียบสนิทโดยไม่มีอะไรเตือน ถ้าไม่บังเอิญไปเจอก่อนก็ไม่ได้ข้อมูลทั้งวัน
+#
+#    StartWhenAvailable ด้านล่างครอบเคสเปิดเครื่องสายอยู่แล้ว จึงไม่ต้องใช้ trigger นี้
 $triggers = @(
-    (New-ScheduledTaskTrigger -Daily -At $Time),
-    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
+    (New-ScheduledTaskTrigger -Daily -At $Time)
 )
 
 # StartWhenAvailable = ถ้าถึงเวลาแล้วเครื่องปิดอยู่ ให้รันทันทีที่เปิดเครื่อง
@@ -156,14 +161,13 @@ $mailSettings = New-ScheduledTaskSettingsSet `
     -RestartCount 2 `
     -RestartInterval (New-TimeSpan -Minutes 10)
 
+# ⛔ ถอด trigger ตอนล็อกอินออกแล้ว 2026-08-06 เช่นเดียวกับงานดึง
+#    ตัวนี้อันตรายกว่าอีก: หน่วง 25 นาทีหลังล็อกอิน ซึ่งอาจตกกลางรอบดึงพอดี
+#    (6 ส.ค. ล็อกอิน 08:18 -> จะยิง 08:43 ขณะที่ยังดึงไม่จบ)
+#    -SkipIfSent กันได้แค่ "ส่งซ้ำ" กันไม่ได้เรื่อง "ส่งตอนข้อมูลยังไม่ครบ"
 $mailTriggers = @(
-    (New-ScheduledTaskTrigger -Daily -At $MailTime),
-    # trigger ตอนล็อกอิน + หน่วง 25 นาที — เผื่อเปิดเครื่องสาย
-    # หน่วงเพื่อให้รอบดึง (ที่เริ่มตอนล็อกอินเหมือนกัน) ทำงานจบก่อน
-    # ถ้ารอบดึงส่งอีเมลไปแล้ว -SkipIfSent จะกันไม่ให้ส่งซ้ำอยู่ดี
-    (New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME")
+    (New-ScheduledTaskTrigger -Daily -At $MailTime)
 )
-$mailTriggers[1].Delay = "PT25M"
 
 Register-ScheduledTask `
     -TaskName $MailTask `
