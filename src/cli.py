@@ -155,8 +155,10 @@ def backfill(date_from_s: str, date_to_s: str, shop: str | None, platform: str |
 
 @cli.command()
 @click.option("--shop", required=True, help="ร้านที่จะ login")
-def login(shop: str) -> None:
-    """เปิดเบราว์เซอร์ให้ล็อกอินเอง แล้วเก็บ cookie ไว้ใช้ซ้ำ (Phase 3)"""
+@click.option("--wait", "wait_minutes", default=15, show_default=True,
+              help="รอให้ล็อกอินสูงสุดกี่นาที")
+def login(shop: str, wait_minutes: int) -> None:
+    """เปิดเบราว์เซอร์ให้ล็อกอินเอง แล้วเก็บ cookie ไว้ใช้ซ้ำ — ไม่ต้องกด Enter"""
     cfg = load_config()
     s = cfg.shop(shop)
 
@@ -169,9 +171,13 @@ def login(shop: str) -> None:
         raise click.ClickException(f"adapter ของ {s.platform} ยังไม่รองรับการล็อกอิน")
 
     try:
-        adapter.interactive_login()
+        ok = adapter.interactive_login(wait_minutes=wait_minutes)
     finally:
         adapter.close()
+
+    # exit code ต้องบอกความจริง — สคริปต์ที่เรียกต่อจะได้รู้ว่าล็อกอินสำเร็จไหม
+    if not ok:
+        raise SystemExit(1)
 
 
 @cli.command()

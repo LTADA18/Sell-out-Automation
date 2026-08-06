@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -356,10 +357,19 @@ class PlaywrightAdapter(BaseAdapter):
 
     # ── โหมดล็อกอินด้วยมือ (เรียกจาก cli login) ─────────────
 
-    def interactive_login(self) -> None:
-        """เปิดเบราว์เซอร์แบบเห็นหน้าจอ ให้ผู้ใช้พิมพ์รหัสผ่านเอง แล้วเก็บ cookie
+    def interactive_login(self, wait_minutes: int = 15) -> bool:
+        """เปิดเบราว์เซอร์ให้ผู้ใช้ล็อกอินเอง แล้ว **เซฟให้อัตโนมัติ** เมื่อเข้าหลังบ้านได้
 
         โค้ดไม่แตะช่องรหัสผ่าน ไม่อ่านค่าที่พิมพ์ และไม่ยุ่งกับ OTP/CAPTCHA
+
+        ⚠️ เดิมใช้ input() รอกด Enter — พังซ้ำ 3 ครั้งใน 2 วัน (5-6 ส.ค. 2026)
+           เพราะหน้าต่างที่รออยู่เป็นแท็บใน Windows Terminal ซึ่งหาไม่เจอ
+           ผู้ใช้ล็อกอินในเบราว์เซอร์เสร็จแล้วแต่ cookie ไม่เคยถูกเขียนลงไฟล์
+           ระบบจึงอ่านเจอแต่ session เก่าที่ตายแล้ว แล้วรายงาน AUTH_EXPIRED
+           ทั้งที่เบราว์เซอร์ตรงหน้ายังล็อกอินอยู่ — ชวนงงมาก
+
+           ตอนนี้เฝ้าดู URL เอง พอออกจากหน้า login เมื่อไหร่ = ล็อกอินสำเร็จ
+           เซฟทันทีแล้วเซฟซ้ำอีกรอบหลังจากนั้น เผื่อ cookie ที่มาทีหลังจาก redirect
         """
         page = self._open_page(headed=True)
         page.goto(f"{self.base_url}{self.login_path}", wait_until="domcontentloaded")
@@ -368,14 +378,42 @@ class PlaywrightAdapter(BaseAdapter):
         print(f"  ร้าน   : {self.shop.display_name} ({self.shop.shop_id})")
         print(f"  บัญชี  : {self.shop.account or '— ไม่ได้ระบุใน .env —'}")
         print()
-        print("  กรุณาล็อกอินในหน้าต่างเบราว์เซอร์ที่เปิดขึ้นมา (พิมพ์รหัสผ่านเอง)")
+        print("  ล็อกอินในหน้าต่างเบราว์เซอร์ที่เปิดขึ้นมาได้เลย (พิมพ์รหัสผ่านเอง)")
         print("  ถ้ามี OTP / CAPTCHA ให้ทำเองในหน้าต่างนั้น")
         print('  ถ้ามีตัวเลือก "จดจำอุปกรณ์นี้" ให้ติ๊กด้วย จะได้ไม่ต้องขอ OTP อีก')
-        print("  เมื่อเข้าหลังบ้านได้แล้ว กลับมาที่หน้าต่างนี้แล้วกด Enter")
-        input("  >>> กด Enter เมื่อล็อกอินเสร็จ ")
+        print()
+        print("  ** ไม่ต้องกด Enter ** — ระบบจะรู้เองว่าล็อกอินเสร็จแล้วเซฟให้")
+        print(f"  (รอสูงสุด {wait_minutes} นาที · ปิดหน้าต่างเบราว์เซอร์เพื่อยกเลิก)")
+        print()
 
+        deadline = time.time() + wait_minutes * 60
+        ok = False
+        while time.time() < deadline:
+            try:
+                url = page.url
+            except Exception:                            # noqa: BLE001
+                print("  หน้าต่างถูกปิดก่อนล็อกอินเสร็จ — ยังไม่ได้เซฟอะไร")
+                return False
+            if url.startswith(self.base_url) and not any(
+                    h in url.lower() for h in LOGIN_URL_HINTS):
+                ok = True
+                break
+            time.sleep(3)
+
+        if not ok:
+            print(f"  รอครบ {wait_minutes} นาทีแล้วยังไม่เข้าหลังบ้าน — ยังไม่ได้เซฟ")
+            self.close()
+            return False
+
+        print(f"  ✅ เข้าหลังบ้านได้แล้ว ({page.url[:70]})")
+        page.wait_for_timeout(3000)
         self._save_session()
-        print(f"\n  เก็บโปรไฟล์แล้วที่ {self.profile_dir.relative_to(PROJECT_ROOT)}")
+        # เซฟซ้ำอีกรอบ — บางเจ้าตั้ง cookie เพิ่มหลัง redirect รอบสอง
+        page.wait_for_timeout(5000)
+        self._save_session()
+
+        print(f"  เก็บ session แล้วที่ {self.session_file.relative_to(PROJECT_ROOT)}")
         print("  รอบต่อไปจะใช้โปรไฟล์นี้ซ้ำ ไม่ต้องล็อกอิน/ไม่ต้อง OTP อีก")
         print("  (อยู่ใน .gitignore — ห้าม commit เด็ดขาด)")
         self.close()
+        return True
