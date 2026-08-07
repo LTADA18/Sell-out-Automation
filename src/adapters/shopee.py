@@ -57,6 +57,8 @@ SEL = {
                     'button:has-text("Export History")'],
     # แถวในประวัติ ชื่อไฟล์ขึ้นต้นด้วย Order. เสมอ
     "report_rows": ['text=/Order\\.[\\w.]+\\.\\d{8}_\\d{8}\\.(xlsx|zip|csv)/'],
+    # ใช้คัดว่า "ข้อความที่แมตช์มา" เป็นชื่อไฟล์จริง ไม่ใช่กล่องใหญ่ที่มีชื่อไฟล์อยู่ข้างใน
+    # ดูเหตุผลเต็มในคอมเมนต์ของ _report_names
     "row_download": ['button.eds-button--primary:has-text("ดาวน์โหลด")',
                      'button.eds-button--primary:has-text("Download")',
                      'button:has-text("ดาวน์โหลด")',
@@ -68,6 +70,10 @@ SEL = {
                   'text=/รหัส OTP/', 'text=/verification code/i',
                   'text=/เลื่อนเพื่อยืนยัน/', 'text=/Slide to verify/i'],
 }
+
+# ชื่อไฟล์รายงานของ Shopee เต็มรูปแบบ เช่น
+#   Order.all.order_creation_date.20260101_20260131.zip
+REPORT_NAME_RE = re.compile(r"Order\.[\w.]+\.\d{8}_\d{8}\.(?:xlsx|zip|csv)")
 
 # "ยืนยัน" มาจากกล่องทัวร์ "ดูคำสั่งซื้อที่ตรงกัน (2/2)" ที่เจอจริงกับ shopee_01
 # เมื่อ 2026-08-05 — ไม่มีในลิสต์เดิมจึงปิดกล่องนั้นไม่ได้
@@ -632,10 +638,21 @@ class ShopeeAdapter(PlaywrightAdapter):
     # ── ประวัติการดาวน์โหลด ─────────────────────────────────
 
     def _report_names(self, page) -> set[str]:
+        """ชื่อไฟล์ในประวัติการดาวน์โหลด — เอาเฉพาะที่เป็นชื่อไฟล์จริง ๆ
+
+        ⚠️ `text=/regex/` ของ Playwright แมตช์ทุก element ที่ "มีข้อความนั้นอยู่ข้างใน"
+           จึงติดกล่องใหญ่ที่ครอบทั้งหน้ามาด้วย — ข้อความยาวเป็นหมื่นตัวอักษร
+           และมีครบทุกเดือนอยู่ในก้อนเดียว
+           ผลคือ `next(n for n in names if want in n)` ซึ่งวนบน set (ไม่มีลำดับ)
+           มีโอกาสหยิบก้อนใหญ่นั้นมาเป็น "ชื่อไฟล์" แล้วหาปุ่มดาวน์โหลดของแถวไม่เจอ
+           ระบบจะรายงานว่า "Shopee ยังปั่นไฟล์ไม่เสร็จ" ทั้งที่ปุ่มพร้อมกดอยู่แล้ว
+           (เจอจริง 2026-08-07 กับ shopee_08 — ค้างครบทั้ง 7 เดือน)
+        """
         try:
-            return set(page.locator(SEL["report_rows"][0]).all_inner_texts())
+            raw = page.locator(SEL["report_rows"][0]).all_inner_texts()
         except Exception:                                # noqa: BLE001
             return set()
+        return {t.strip() for t in raw if REPORT_NAME_RE.fullmatch(t.strip())}
 
     def _wait_for_report(self, page, before: set[str], date_from: date, date_to: date,
                          timeout_sec: int = 300) -> str:
@@ -670,12 +687,20 @@ class ShopeeAdapter(PlaywrightAdapter):
         )
 
     def _top_report_name(self, page) -> str | None:
-        """ชื่อไฟล์แถวบนสุดของประวัติ = รายการล่าสุด"""
+        """ชื่อไฟล์แถวบนสุดของประวัติ = รายการล่าสุด
+
+        กรองด้วย REPORT_NAME_RE ด้วยเหตุผลเดียวกับ _report_names —
+        .first อาจเป็นกล่องใหญ่ที่ครอบทั้งหน้า ไม่ใช่ชื่อไฟล์
+        """
         try:
-            loc = page.locator(SEL["report_rows"][0]).first
-            return loc.inner_text(timeout=4000).strip() if loc.count() else None
+            texts = page.locator(SEL["report_rows"][0]).all_inner_texts()
         except Exception:                                # noqa: BLE001
             return None
+        for t in texts:
+            t = t.strip()
+            if REPORT_NAME_RE.fullmatch(t):
+                return t
+        return None
 
     def _try_row_download_button(self, page, label: str):
         """ปุ่มดาวน์โหลด "ของแถวนั้น" — ไต่ขึ้นจากชื่อไฟล์ทีละชั้น

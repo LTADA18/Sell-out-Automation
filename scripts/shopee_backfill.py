@@ -67,14 +67,49 @@ def save_state(st: dict) -> None:
     STATE_FILE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def open_shop(adapter):
-    """เปิดหน้าคำสั่งซื้อของร้าน ผ่านหน้าเลือกร้าน + ปิดทัวร์แนะนำ"""
+def goto_retry(page, url: str, tries: int = 3) -> None:
+    """SPA ของ Shopee ชอบสั่ง navigate ทับระหว่าง goto → net::ERR_ABORTED
+
+    ไม่ใช่เน็ตพังและไม่ใช่ session หมด — ลองใหม่ก็ผ่าน
+    เจอจริง 2026-08-07 กับ shopee_03 หลังเพิ่งสลับร้านเสร็จ
+    """
+    last: Exception | None = None
+    for _ in range(tries):
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            return
+        except Exception as exc:                          # noqa: BLE001
+            last = exc
+            if "ERR_ABORTED" not in str(exc):
+                raise
+            page.wait_for_timeout(3000)
+    raise last                                            # type: ignore[misc]
+
+
+def open_shop(adapter, want_name: str = ""):
+    """เปิดหน้าคำสั่งซื้อของร้าน ผ่านหน้าเลือกร้าน + ปิดทัวร์แนะนำ
+
+    ⚠️ ลำดับสำคัญ: ต้อง _ensure_logged_in ก่อน _enter_shop
+       ถ้าเลือกร้านก่อน พอ session หมดแล้ว relogin สำเร็จ หน้าจะค้างอยู่ที่หน้าเลือกร้าน
+       แล้ว collect_shop จะหาไฟล์ไม่เจอ คืน 0 ไฟล์แบบ "ไม่มี error" — จบรอบเงียบ ๆ
+       (เจอจริง 2026-08-07 กับ shopee_08: relogin_ok แต่เก็บได้ 0 ไฟล์ แล้ว exit 0)
+       ตรงกับที่แก้ไปแล้วใน ShopeeAdapter._export
+    """
     page = adapter._open_page(headed=False)
-    page.goto(adapter.orders_url, wait_until="domcontentloaded")
+    goto_retry(page, adapter.orders_url)
     page.wait_for_timeout(9000)
-    adapter._enter_shop(page)
     adapter._ensure_logged_in(page, adapter.orders_url)
+    adapter._enter_shop(page)
     adapter._dismiss_onboarding(page)
+
+    # กันติดป้ายผิดร้าน — บัญชีเดียวดูได้หลายร้าน ถ้าอยู่ผิดร้านไฟล์จะเป็นของอีกร้าน
+    if want_name:
+        cur = adapter._current_shop_name(page)
+        if cur and cur.strip().lower() != want_name.strip().lower():
+            raise AdapterError(
+                f"อยู่ผิดร้าน — เปิดอยู่ {cur!r} แต่ต้องการ {want_name!r}",
+                error_type="WRONG_SHOP",
+            )
     return page
 
 
@@ -256,6 +291,7 @@ def phase_request(cfg, st: dict) -> None:
 def collect_shop(adapter, page, shop_id: str, st: dict) -> int:
     """โหลดไฟล์ที่พร้อมของร้านนี้ คืนจำนวนที่โหลดได้รอบนี้"""
     got = 0
+    missing_from_history: list[tuple[date, date]] = []
     _click_first(page, SEL["history_btn"], 8000)
     page.wait_for_timeout(3000)
 
@@ -266,9 +302,14 @@ def collect_shop(adapter, page, shop_id: str, st: dict) -> int:
         want = stamp(a, b)
         label = next((n for n in adapter._report_names(page) if want in n), None)
         if not label:
+            # ไม่มีบรรทัดนี้ในประวัติ = ยังไม่ได้สั่ง หรือไฟล์หมดอายุไปแล้ว
+            # ต้องพิมพ์บอก ไม่งั้นรอบจะจบเงียบ ๆ แล้วดูเหมือนไม่มีอะไรผิด
+            print(f"   ·  {a:%Y-%m} ไม่มีในประวัติการดาวน์โหลด", flush=True)
+            missing_from_history.append((a, b))
             continue
         btn = adapter._try_row_download_button(page, label)
         if btn is None:                                   # ยังเป็นสปินเนอร์ = ยังไม่เสร็จ
+            print(f"   ⏳ {a:%Y-%m} Shopee ยังปั่นไฟล์ไม่เสร็จ", flush=True)
             continue
         try:
             src = adapter._capture_download(page, btn.click, timeout_ms=180_000)
@@ -282,6 +323,22 @@ def collect_shop(adapter, page, shop_id: str, st: dict) -> int:
         except Exception as exc:                          # noqa: BLE001
             print(f"   ⚠️ {a:%Y-%m} โหลดไม่สำเร็จ: {exc}", flush=True)
         page.wait_for_timeout(2000)
+
+    # สั่ง export ใหม่ให้เดือนที่หายไปจากประวัติ — ไฟล์ของ Shopee มีวันหมดอายุ
+    # ถ้าไม่สั่งใหม่ รอบถัดไปก็จะไม่เจอเหมือนเดิม วนฟรีจนครบ rounds แล้วจบเงียบ ๆ
+    if missing_from_history:
+        print(f"   ↻ สั่ง export ใหม่ {len(missing_from_history)} เดือนที่หมดอายุ", flush=True)
+        goto_retry(page, adapter.orders_url)
+        page.wait_for_timeout(6000)
+        for a, b in missing_from_history:
+            try:
+                request_one(adapter, page, a, b, lambda m: print(f"      {m}", flush=True))
+                st["requested"].append(f"{shop_id}|{stamp(a, b)}")
+                save_state(st)
+            except Exception as exc:                      # noqa: BLE001
+                print(f"   ⚠️ สั่ง {a:%Y-%m} ไม่สำเร็จ: {exc}", flush=True)
+            close_modal(page)
+            page.wait_for_timeout(2000)
     return got
 
 
@@ -310,10 +367,11 @@ def phase_collect(cfg, st: dict, rounds: int, wait_min: int) -> None:
             print(f"\n{shop_id} — {s.display_name}", flush=True)
             adapter = build_adapter(s, cfg.settings)
             try:
-                page = open_shop(adapter)
+                page = open_shop(adapter, s.web_name)
                 collect_shop(adapter, page, shop_id, st)
             except Exception as exc:                      # noqa: BLE001
                 print(f"   ❌ {exc}")
+                traceback.print_exc()
             finally:
                 adapter.close()
             time.sleep(3)
@@ -417,9 +475,19 @@ def main() -> int:
     if args.phase in ("merge", "all"):
         phase_merge(cfg, st)
 
-    print(f"\nสรุป: สั่งไป {len(st['requested'])} · เก็บได้ {len(st['collected'])}/"
-          f"{len(SHOP_IDS) * len(PERIODS)}")
+    # ⚠️ ต้องนับด้วย collected_in_scope ไม่ใช่ len(st["collected"])
+    #    ของเก่าจากร้านอื่นทำให้ตัวเลขเกินเป้าจนดูเหมือนเสร็จ (เคยพิมพ์ "39/14")
+    have, want = collected_in_scope(st), len(SHOP_IDS) * len(PERIODS)
+    print(f"\nสรุป: เก็บได้ {have}/{want} ไฟล์ (เฉพาะร้านที่รันรอบนี้)")
     print(f"ไฟล์อยู่ที่ {BASE}")
+
+    if args.phase in ("collect", "all") and have < want:
+        # exit code ต้องไม่ใช่ 0 — ไม่งั้นงานที่เก็บไม่ครบจะดู "สำเร็จ" แล้วเงียบหายไป
+        missing = [f"{sid}|{stamp(a, b)[:6]}"
+                   for sid in SHOP_IDS for a, b in PERIODS
+                   if f"{sid}|{stamp(a, b)}" not in st["collected"]]
+        print(f"❌ ยังขาด {len(missing)} ไฟล์: {missing}")
+        return 1
     return 0
 
 
