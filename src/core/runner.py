@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Iterator
 
 from src.adapters.registry import build_adapter
+from src.core.browser_cleanup import close_stale_browsers
 from src.core.config import PROJECT_ROOT, AppConfig, ShopConfig, rel_to_project
 from src.core.exporter import export_shop
 from src.core.logging_setup import get_logger
@@ -288,6 +289,13 @@ class Runner:
         results: list[RunResult] = []
 
         log.info("run_start", run_id=run_id, run_date=run_date.isoformat(), shops=len(shops))
+
+        # Chrome ที่ค้างจากรอบก่อนล็อกโฟลเดอร์โปรไฟล์ไว้ ทำให้เปิด Chrome ตัวจริงไม่ได้
+        # แล้วถอยไปใช้ Chromium ที่เรนเดอร์หน้า Shopee ไม่ครบ → รายงานผิดว่า NO_PERMISSION
+        # เคลียร์ตรงนี้เพราะเป็นทางผ่านของทุกรอบ ทั้ง scheduler และสั่งมือ
+        closed = close_stale_browsers()
+        if closed:
+            log.info("chrome_cleared_before_run", closed=closed)
 
         for i, shop in enumerate(shops):
             results.append(self.run_shop(shop, run_id, run_date))
