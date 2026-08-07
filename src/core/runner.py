@@ -155,7 +155,7 @@ class Runner:
             run_date=run_date_s,
             shop_id=shop.shop_id,
             platform=shop.platform,
-            shop_name=shop.display_name,
+            shop_name=shop.report_name,
             status=RunStatus.RUNNING,
             started_at=started,
         )
@@ -199,7 +199,7 @@ class Runner:
                 orders,
                 shop_id=shop.shop_id,
                 platform=shop.platform,
-                shop_name=shop.display_name,
+                shop_name=shop.report_name,
                 run_date=run_date_s,
                 date_from=date_from.isoformat(),
                 date_to=date_to.isoformat(),

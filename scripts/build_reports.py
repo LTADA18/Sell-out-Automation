@@ -26,6 +26,8 @@ from openpyxl.cell import WriteOnlyCell
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.core.naming import canonical_name                # noqa: E402
+
 SOURCES = [
     PROJECT_ROOT / "output" / "_shopee_backfill_2026h1" / "2026-01_ถึง_2026-07",
     PROJECT_ROOT / "output" / "_backfill_2026h1_all" / "2026-01_ถึง_2026-07",
@@ -94,8 +96,15 @@ def main() -> int:
             print(f"  ⚠️ {p.name}: คอลัมน์ไม่ตรงกับไฟล์แรก ข้ามไฟล์นี้")
             continue
         i_shop = header.index("shop_id")
+        # เขียนชื่อร้านมาตรฐานทับของเดิม — ไฟล์ต้นทางเก็บชื่อตามที่แต่ละแพลตฟอร์มตั้งไว้
+        # ซึ่งร้านเดียวกันสะกดไม่ตรงกัน (powerstool vs Powerstools)
+        # ถ้าไม่ทับ เวลา pivot ตามชื่อร้าน ยอดของร้านเดียวจะแยกเป็นคนละก้อน
+        i_name = header.index("shop_name") if "shop_name" in header else None
         for r in rows:
-            by_shop[str(r[i_shop])].append(r)
+            sid = str(r[i_shop])
+            if i_name is not None:
+                r[i_name] = canonical_name(sid, str(r[i_name] or ""))
+            by_shop[sid].append(r)
         print(f"  {p.name[:58]:<60} {len(rows):>8,} แถว")
 
     assert header is not None

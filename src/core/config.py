@@ -63,6 +63,24 @@ class ShopConfig(BaseModel):
         return self.web_shop_name or self.display_name
 
     @property
+    def report_name(self) -> str:
+        """ชื่อมาตรฐานที่ใช้ในรายงาน — ร้านเดียวกันคนละแพลตฟอร์มได้ชื่อเดียวกัน
+
+        มาจาก `name` ของแบรนด์ใน brands.yaml ถ้าไม่ได้ประกาศไว้ก็ใช้ display_name
+        ⚠️ อย่าเอาไปใช้จับคู่ร้านบนเว็บ — ตรงนั้นต้องใช้ web_name ที่เป็นชื่อจริง
+        """
+        from src.core.naming import canonical_name
+
+        return canonical_name(self.shop_id, self.display_name)
+
+    @property
+    def email_name(self) -> str:
+        """ชื่อสำหรับอีเมล — วงเล็บชื่อจริงไว้ถ้าไม่ตรงกับชื่อมาตรฐาน"""
+        from src.core.naming import email_label
+
+        return email_label(self.shop_id, self.display_name)
+
+    @property
     def account(self) -> str | None:
         if not self.account_key:
             return None

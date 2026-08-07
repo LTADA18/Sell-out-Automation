@@ -87,6 +87,24 @@ def build_subject(run_date: str, rows: list[dict],
     return f"{head}{what} — {n_ok}/{len(rows)} ร้าน · {orders:,} ออเดอร์{tail}"
 
 
+def _shop_label(row: dict) -> str:
+    """ชื่อร้านในอีเมล — "ชื่อมาตรฐาน (ชื่อจริงบนแพลตฟอร์ม)" ถ้า 2 ชื่อไม่ตรงกัน
+
+    run_log เก็บชื่อมาตรฐานไว้แล้ว ตรงนี้จึงไปหยิบ "ชื่อจริง" จาก shops.yaml มาต่อท้าย
+    เพื่อให้ตรวจย้อนได้ว่าตัวเลขนี้มาจากร้านไหนบนแพลตฟอร์ม
+    ถ้าอ่าน config ไม่ได้ (เช่นเทสต์ที่ส่ง row ดิบมา) ให้ใช้ชื่อใน row ตามเดิม
+    """
+    canon = row.get("shop_name") or ""
+    try:
+        from src.core.config import load_config
+
+        shop = load_config().shop(row["shop_id"])
+    except Exception:                                    # noqa: BLE001
+        return canon
+    real = shop.display_name
+    return f"{canon} ({real})" if real and real != canon else canon
+
+
 def build_html(run_date: str, rows: list[dict],
                data_from: str | None = None, data_to: str | None = None) -> str:
     """ตารางสรุปฝังในเนื้ออีเมล — เปิดแล้วเห็นเลยไม่ต้องกดไฟล์แนบ
@@ -110,7 +128,7 @@ def build_html(run_date: str, rows: list[dict],
             f'<td style="padding:6px 10px;border-bottom:1px solid #e3e6ea;color:{color};'
             f'white-space:nowrap">{icon} {r["status"]}</td>'
             f'<td style="padding:6px 10px;border-bottom:1px solid #e3e6ea">'
-            f'<b>{r["shop_name"]}</b><br><span style="color:#697280;font-size:12px">'
+            f'<b>{_shop_label(r)}</b><br><span style="color:#697280;font-size:12px">'
             f'{r["shop_id"]} · {r["platform"]}</span></td>'
             f'<td style="padding:6px 10px;border-bottom:1px solid #e3e6ea;text-align:right">'
             f'{r["orders_fetched"]:,}</td>'

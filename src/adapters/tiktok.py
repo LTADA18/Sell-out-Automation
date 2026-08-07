@@ -291,7 +291,7 @@ class TiktokAdapter(PlaywrightAdapter):
                 order_id=order_id,
                 platform=self.shop.platform,
                 shop_id=self.shop.shop_id,
-                shop_name=self.shop.display_name,
+                shop_name=self.shop.report_name,
                 order_created_at=m.parse_dt(m.get(row, "order_created_at")),
                 order_updated_at=m.parse_dt(m.get(row, "delivered_at"))
                                  or m.parse_dt(m.get(row, "shipped_at")),

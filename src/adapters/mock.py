@@ -88,7 +88,7 @@ class MockAdapter(BaseAdapter):
                     order_id=item["order_sn"],
                     platform=self.shop.platform,
                     shop_id=self.shop.shop_id,
-                    shop_name=self.shop.display_name,
+                    shop_name=self.shop.report_name,
                     order_created_at=datetime.fromisoformat(item["create_time"]),
                     order_updated_at=datetime.fromisoformat(item["update_time"]),
                     paid_at=(
