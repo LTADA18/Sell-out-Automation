@@ -58,7 +58,8 @@ try {
 # ครอบ try/catch เหมือน Dashboard: อีเมลไม่ออกไม่ควรทำให้ exit code ของรอบเพี้ยน
 if ($Mail) {
     try {
-        & $py -m src.cli notify --to $MailTo --cc $MailCc
+        # --only-if-complete: เจ้าของงานสั่ง 2026-08-07 ว่าไม่ครบทุกร้านห้ามส่ง
+        & $py -m src.cli notify --to $MailTo --cc $MailCc --only-if-complete
     } catch {
         Write-Host "ส่งอีเมลไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
     }

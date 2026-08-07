@@ -32,10 +32,17 @@ SEL = {
     # ปุ่มเปิด modal — ใช้ class เฉพาะ เพราะคำว่า "ดาวน์โหลด" โผล่ 13 จุดบนหน้าเดียว
     "open_modal": ["button.export-with-modal"],
     # ปุ่มยืนยันในกล่อง (สีแดง = primary) คนละตัวกับปุ่มเปิด
+    # ⚠️ ห้ามพึ่งข้อความอย่างเดียว — ปุ่มนี้เปลี่ยนคำตามภาษาและตามเวอร์ชันหน้าเว็บ
+    #    (2026-08-07 shopee_03/08 พังเพราะไม่ตรงทั้ง "ดาวน์โหลด" และ "Download")
+    #    ตัวสุดท้ายเป็นทางถอยแบบไม่สนข้อความ: ปุ่ม primary ในกล่อง ซึ่งคือปุ่มยืนยันเสมอ
     "confirm": ['.eds-modal__box button.eds-button--primary:has-text("ดาวน์โหลด")',
                 '.eds-modal__box button.eds-button--primary:has-text("Download")',
+                '.eds-modal__box button.eds-button--primary:has-text("ยืนยัน")',
+                '.eds-modal__box button.eds-button--primary:has-text("Confirm")',
                 'button.eds-button--primary:has-text("ดาวน์โหลด")',
-                'button.eds-button--primary:has-text("Download")'],
+                'button.eds-button--primary:has-text("Download")',
+                '.eds-modal__box button.eds-button--primary',
+                '.eds-modal__footer button.eds-button--primary'],
     # ⚠️ ช่องช่วงเวลาเป็น <div> ไม่ใช่ <input> — หา input จะไม่เจอ
     "range_input": [".eds-date-picker__input"],
     "picker_panel": [".eds-daterange-picker-panel"],
@@ -58,7 +65,8 @@ SEL = {
 
 # "ยืนยัน" มาจากกล่องทัวร์ "ดูคำสั่งซื้อที่ตรงกัน (2/2)" ที่เจอจริงกับ shopee_01
 # เมื่อ 2026-08-05 — ไม่มีในลิสต์เดิมจึงปิดกล่องนั้นไม่ได้
-ONBOARD_CLOSE = ("ตกลง", "ต่อไป", "ข้าม", "เข้าใจแล้ว", "ยืนยัน", "Got it", "Next")
+ONBOARD_CLOSE = ("ตกลง", "ต่อไป", "ข้าม", "เข้าใจแล้ว", "ยืนยัน",
+                 "Got it", "Next", "Skip", "OK", "Confirm", "I understand")
 
 
 def _click_first(page, keys: list[str], timeout: int = 8000) -> bool:
@@ -322,13 +330,20 @@ class ShopeeAdapter(PlaywrightAdapter):
 
     TH_MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
                  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม")
+    # ⚠️ ร้านที่ตั้งหลังบ้านเป็นอังกฤษ หัวปฏิทินจะขึ้น "August 2026" ไม่ใช่ "สิงหาคม2026"
+    #    ถ้าเทียบแต่ไทยจะหาเดือนไม่เจอแล้วเลื่อนปฏิทินไม่ได้เลย
+    #    (เจอจริง 2026-08-07 กับ shopee_03/shopee_08 บัญชี tnltools)
+    EN_MONTHS = ("January", "February", "March", "April", "May", "June",
+                 "July", "August", "September", "October", "November", "December")
 
     def _panel_for(self, page, target: date):
         """คืนแผงเดือน (ซ้าย/ขวา) ที่กำลังแสดงเดือนของ target — ไม่เจอคืน None
 
-        ปฏิทินโชว์ 2 เดือนคู่กัน หัวแต่ละแผงเป็น 2 span: ชื่อเดือนไทย + ปี ค.ศ.
+        ปฏิทินโชว์ 2 เดือนคู่กัน หัวแต่ละแผงเป็น 2 span: ชื่อเดือน + ปี ค.ศ.
+        รองรับทั้งไทยและอังกฤษ และรองรับทั้งชื่อเต็ม/ชื่อย่อ (Aug / August)
         """
-        want = f"{self.TH_MONTHS[target.month - 1]}{target.year}"
+        y = str(target.year)
+        th, en = self.TH_MONTHS[target.month - 1], self.EN_MONTHS[target.month - 1]
         for side in ("left", "right"):
             panel = page.locator(f".eds-daterange-picker-panel__body-{side}").first
             if panel.count() == 0:
@@ -337,7 +352,12 @@ class ShopeeAdapter(PlaywrightAdapter):
                 labels = panel.locator(SEL["month_label"][0]).all_inner_texts()
             except Exception:                            # noqa: BLE001
                 continue
-            if "".join(x.strip() for x in labels[:2]) == want:
+            # ตัดช่องว่างทิ้งทั้งหมดก่อนเทียบ — อังกฤษมีเว้นวรรคระหว่างเดือนกับปี
+            got = "".join(x.strip() for x in labels[:2]).replace(" ", "")
+            if not got or y not in got:
+                continue
+            head = got.replace(y, "")
+            if head == th or head.lower() in (en.lower(), en[:3].lower()):
                 return panel
         return None
 

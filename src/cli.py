@@ -13,6 +13,7 @@ from src.core.config import PROJECT_ROOT, load_config
 from src.core import mailer
 from src.core.dashboard import build as build_dashboard
 from src.core.logging_setup import setup_logging
+from src.core.models import RunStatus
 from src.core.runner import (AlreadyRunningError, Runner, date_range, run_lock,
                              summarize)
 from src.core.status_store import StatusStore
@@ -211,8 +212,11 @@ def reminders(run_time: str, before_s: str) -> None:
 @click.option("--draft", is_flag=True, help="เปิดหน้าต่างร่างให้ตรวจก่อน ไม่ส่งทันที")
 @click.option("--skip-if-sent", is_flag=True,
               help="ถ้าส่งของวันนี้ไปแล้วให้ออกทันที (ใช้กับ task สำรอง)")
+@click.option("--only-if-complete", is_flag=True,
+              help="ส่งเฉพาะเมื่อดึงครบทุกร้าน มีร้านไหน FAILED ไม่ส่ง")
 def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
-           no_excel: bool, draft: bool, skip_if_sent: bool) -> None:
+           no_excel: bool, draft: bool, skip_if_sent: bool,
+           only_if_complete: bool) -> None:
     """ส่งสรุปผลการดึงทางอีเมลผ่าน Outlook"""
     cfg = load_config()
     out_dir = PROJECT_ROOT / cfg.settings.paths.output_dir
@@ -220,6 +224,18 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
 
     run_date, rows = mailer.read_rows(db, _parse(run_date_s, "--date").isoformat()
                                       if run_date_s else None)
+
+    # ⛔ เจ้าของงานสั่ง 2026-08-07: ยังไม่ครบทุกร้าน ห้ามส่งเมล
+    #    ⚠️ ผลข้างเคียงที่ต้องรู้: วันไหนมีร้านพัง จะไม่มีอีเมลออกเลย
+    #       ของเดิมอีเมลทำหน้าที่แจ้งเตือนด้วย (ขึ้น ⚠️ ในหัวข้อ + ชื่อร้านที่ต้องแก้)
+    #       ตอนนี้ถ้าไม่มีใครมาดู Dashboard จะไม่รู้ว่าพัง
+    if only_if_complete:
+        bad = [r for r in rows if r["status"] == RunStatus.FAILED.value]
+        if bad:
+            names = ", ".join(r["shop_id"] for r in bad)
+            click.echo(f"⛔ ไม่ส่งอีเมล — ยังดึงไม่ครบ ({len(bad)} ร้านล้มเหลว: {names})")
+            click.echo("   แก้ให้ครบแล้วรัน notify อีกครั้ง หรือส่งเองด้วย .\\send_report.ps1")
+            sys.exit(0)
 
     # กันส่งซ้ำ — รอบหลักส่งท้าย run_daily แล้ว task สำรองตอน 8 โมงจะได้ไม่ส่งอีกฉบับ
     marker = PROJECT_ROOT / cfg.settings.paths.logs_dir / f".mail_sent_{run_date}"
