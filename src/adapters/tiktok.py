@@ -37,6 +37,11 @@ SEL = {
     # ถ้าไม่ระบุจะไปกดปุ่มนอกที่ถูก drawer บังอยู่ แล้วค้างจน timeout
     "download_btn": ['button.p-btn-size-small:has-text("ดาวน์โหลด")',
                      'button.p-btn-size-small:has-text("Download")'],
+    # ร่องรอย CAPTCHA / OTP — เจอเมื่อไหร่ต้องหยุด ห้ามพยายามผ่าน (กฎเหล็กข้อ 5)
+    "challenge": ["iframe[src*='captcha']", "iframe[src*='verify']",
+                  "[class*='captcha']", "[class*='secsdk']",
+                  'text=/รหัสยืนยัน/', 'text=/verification code/i',
+                  'text=/เลื่อนเพื่อ/', 'text=/Slide to/i'],
 }
 
 
@@ -67,6 +72,74 @@ class TiktokAdapter(PlaywrightAdapter):
     name = "playwright"
     base_url_env = "TIKTOK_SELLER_URL"
     login_path = "/account/login"
+
+    def auto_relogin(self, page) -> bool:
+        """ต่ออายุ session เองโดยกดปุ่มบนฟอร์มที่ Chrome เติมรหัสไว้แล้ว
+
+        ⚠️ ระบบไม่เก็บ ไม่อ่าน ไม่พิมพ์รหัสผ่าน — Chrome ในโปรไฟล์ร้านนี้เป็นคนเติม
+           โค้ดเช็คแค่ว่าช่องรหัสมีค่าไหม (ดูความยาว ไม่ดูค่า) แล้วกดปุ่ม
+
+        เจอ CAPTCHA / OTP = หยุดทันที ไม่พยายามผ่าน (กฎเหล็กข้อ 5)
+
+        ทำไมต้องมี: tiktok_02 (บัญชี toolsdee1) session หลุดข้ามคืนทุกวัน
+        ถ้าไม่ต่ออายุเองต้องให้คนมาล็อกอินมือทุกเช้า
+        """
+        page.goto(f"{self.base_url}{self.login_path}", wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+
+        # ⚠️ ถ้าถูกเด้งออกจากหน้า login = ยังล็อกอินอยู่ ไม่ต้องทำอะไรต่อ
+        #    (2026-08-07 tiktok_02 ถูกเด้งไป /homepage แต่โค้ดหาช่องรหัสไม่เจอ
+        #     เลยรายงานว่าต่ออายุไม่ได้ ทั้งที่เข้าหลังบ้านได้อยู่)
+        if not any(h in page.url.lower() for h in ("login", "signin")):
+            log.info("relogin_already_logged_in", shop_id=self.shop.shop_id,
+                     url=page.url[:70])
+            return True
+
+        filled = 0
+        for _ in range(10):
+            page.wait_for_timeout(1500)
+            try:
+                filled = page.evaluate(
+                    "() => { const p = document.querySelector('input[type=password]');"
+                    " return p ? p.value.length : 0; }"
+                )
+            except Exception:                            # noqa: BLE001
+                filled = 0
+            if filled:
+                break
+        if not filled:
+            log.warning("relogin_no_saved_password", shop_id=self.shop.shop_id)
+            return False
+        log.info("relogin_form_prefilled", shop_id=self.shop.shop_id, pw_len=filled)
+
+        clicked = False
+        for name in ("เข้าสู่ระบบ", "Log in", "Login", "Sign in"):
+            try:
+                btn = page.get_by_role("button", name=name, exact=True).first
+                btn.wait_for(state="visible", timeout=5000)
+                btn.click(timeout=8000)
+                clicked = True
+                break
+            except Exception:                            # noqa: BLE001
+                continue
+        if not clicked:
+            log.warning("relogin_button_missing", shop_id=self.shop.shop_id)
+            return False
+
+        for _ in range(12):
+            page.wait_for_timeout(1500)
+            for sel in SEL["challenge"]:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=600):
+                        self._screenshot_on_error(page, "relogin_challenge")
+                        log.warning("relogin_challenge", shop_id=self.shop.shop_id, sel=sel)
+                        return False
+                except Exception:                        # noqa: BLE001
+                    continue
+            if not any(h in page.url.lower() for h in ("login", "signin")):
+                log.info("relogin_ok", shop_id=self.shop.shop_id, url=page.url[:70])
+                return True
+        return False
 
     def _export(self, page, date_from: date, date_to: date) -> Path:
         start_ms, end_ms = _epoch_ms(date_from, False), _epoch_ms(date_to, True)

@@ -61,6 +61,11 @@ SEL = {
                      'button:has-text("ดาวน์โหลด")',
                      'button:has-text("Download")'],
     "onboarding": ["div.onboarding-masked"],
+    # ร่องรอย CAPTCHA / OTP — เจอเมื่อไหร่ต้องหยุด ห้ามพยายามผ่าน (กฎเหล็กข้อ 5)
+    "challenge": ["iframe[src*='captcha']", "iframe[src*='verify']",
+                  ".shopee-captcha", "[class*='captcha']",
+                  'text=/รหัส OTP/', 'text=/verification code/i',
+                  'text=/เลื่อนเพื่อยืนยัน/', 'text=/Slide to verify/i'],
 }
 
 # "ยืนยัน" มาจากกล่องทัวร์ "ดูคำสั่งซื้อที่ตรงกัน (2/2)" ที่เจอจริงกับ shopee_01
@@ -233,6 +238,78 @@ class ShopeeAdapter(PlaywrightAdapter):
                 page.wait_for_timeout(800)
                 log.info("onboarding_removed", shop_id=self.shop.shop_id)
                 return
+
+    def auto_relogin(self, page) -> bool:
+        """ต่ออายุ session เองโดยกดปุ่มบนฟอร์มที่ Chrome เติมรหัสไว้แล้ว
+
+        ⚠️ ระบบไม่เก็บ ไม่อ่าน ไม่พิมพ์รหัสผ่าน — Chrome ในโปรไฟล์ร้านนี้เป็นคนเติม
+           (จากตอนที่คนล็อกอินด้วยมือครั้งแรกแล้วให้ Chrome จำไว้)
+           โค้ดทำแค่ 2 อย่าง: เช็คว่าช่องรหัสมีค่าไหม (ดูความยาว ไม่ดูค่า) แล้วกดปุ่ม
+
+        เจอ CAPTCHA / OTP เมื่อไหร่ = หยุดทันที ไม่พยายามผ่าน (กฎเหล็กข้อ 5)
+
+        ทำไมต้องมี: บัญชี tnltools ถูกเตะ session ทุกวัน (มีคนอื่นล็อกอินพร้อมกัน)
+        ถ้าไม่ต่ออายุเอง shopee_03/shopee_08 จะพังทุกเช้าและต้องให้คนมาล็อกอินมือ
+        แบบเดียวกับที่ Lazada ทำมาแล้วและได้ผลจริง
+        """
+        page.goto(f"{self.base_url}{self.login_path}", wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+
+        # ⚠️ ถ้าถูกเด้งออกจากหน้า login = ยังล็อกอินอยู่ ไม่ต้องทำอะไรต่อ
+        #    ของเดิมไล่หาช่องรหัสผ่านซึ่งไม่มีในหน้าหลัก แล้วคืน False
+        #    ทำให้รายงานว่า "ต่ออายุไม่ได้" ทั้งที่เข้าหลังบ้านได้อยู่ (เจอ 2026-08-07)
+        if not any(h in page.url.lower() for h in ("login", "signin")):
+            log.info("relogin_already_logged_in", shop_id=self.shop.shop_id,
+                     url=page.url[:70])
+            return True
+
+        # Chrome เติมรหัสช้ากว่า domcontentloaded — ต้อง poll ไม่ใช่รอเวลาตายตัว
+        filled = 0
+        for _ in range(10):
+            page.wait_for_timeout(1500)
+            try:
+                filled = page.evaluate(
+                    "() => { const p = document.querySelector('input[type=password]');"
+                    " return p ? p.value.length : 0; }"
+                )
+            except Exception:                            # noqa: BLE001
+                filled = 0
+            if filled:
+                break
+        if not filled:
+            log.warning("relogin_no_saved_password", shop_id=self.shop.shop_id)
+            return False
+        log.info("relogin_form_prefilled", shop_id=self.shop.shop_id, pw_len=filled)
+
+        # ปุ่มมี <span> ซ้อนข้างใน — ใช้ get_by_role ที่ดู accessible name ถึงจะกดติด
+        clicked = False
+        for name in ("เข้าสู่ระบบ", "Log In", "Login", "Sign in"):
+            try:
+                btn = page.get_by_role("button", name=name, exact=True).first
+                btn.wait_for(state="visible", timeout=5000)
+                btn.click(timeout=8000)
+                clicked = True
+                break
+            except Exception:                            # noqa: BLE001
+                continue
+        if not clicked:
+            log.warning("relogin_button_missing", shop_id=self.shop.shop_id)
+            return False
+
+        for _ in range(12):
+            page.wait_for_timeout(1500)
+            for sel in SEL["challenge"]:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=600):
+                        self._screenshot_on_error(page, "relogin_challenge")
+                        log.warning("relogin_challenge", shop_id=self.shop.shop_id, sel=sel)
+                        return False                     # OTP/CAPTCHA ต้องให้คนทำเอง
+                except Exception:                        # noqa: BLE001
+                    continue
+            if not any(h in page.url.lower() for h in ("login", "signin")):
+                log.info("relogin_ok", shop_id=self.shop.shop_id, url=page.url[:70])
+                return True
+        return False
 
     def _clear_overlay_over(self, page, sel: str) -> str:
         """ซ่อนสิ่งที่ลอยทับปุ่มอยู่ คืนผลลัพธ์ไว้ log

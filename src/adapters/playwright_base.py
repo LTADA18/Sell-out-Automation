@@ -145,7 +145,10 @@ class PlaywrightAdapter(BaseAdapter):
         try:
             export_path = self._export(page, date_from, date_to)
         finally:
-            self._save_session()
+            # ⚠️ ห้ามเซฟถ้าตอนนี้อยู่หน้า login — จะเป็นการเขียนทับ session ดี
+            #    ด้วยสถานะ "ไม่ได้ล็อกอิน" (เจอจริง 2026-08-07: รอบรายวันล้มเหลว
+            #    แล้วเซฟทับ session ที่ผู้ใช้เพิ่งล็อกอินมา ต้องล็อกอินใหม่ทั้งที่เพิ่งทำ)
+            self._save_session_if_logged_in(page)
 
         rows = self.map.read_export(export_path)
         if not rows:
@@ -247,6 +250,22 @@ class PlaywrightAdapter(BaseAdapter):
         except Exception as exc:                         # noqa: BLE001
             # กู้ไม่ได้ก็ปล่อยผ่าน — เดี๋ยว _assert_logged_in จับเป็น AUTH_EXPIRED เอง
             log.warning("restore_cookies_failed", shop_id=self.shop.shop_id, err=str(exc)[:150])
+
+    def _save_session_if_logged_in(self, page) -> None:
+        """เซฟ session เฉพาะเมื่อยังอยู่ในระบบ — กันเขียนทับของดีด้วยของเสีย
+
+        ถ้าอ่าน URL ไม่ได้ (หน้าถูกปิดไปแล้ว) ก็ไม่เซฟ ปลอดภัยกว่าเดา
+        """
+        try:
+            url = page.url.lower()
+        except Exception:                                # noqa: BLE001
+            log.info("skip_save_session", shop_id=self.shop.shop_id, reason="อ่าน url ไม่ได้")
+            return
+        if any(h in url for h in LOGIN_URL_HINTS):
+            log.warning("skip_save_session", shop_id=self.shop.shop_id,
+                        reason="อยู่หน้า login — ไม่เขียนทับ session เดิม")
+            return
+        self._save_session()
 
     def _save_session(self) -> None:
         """สำเนา cookie ออกมาไว้ debug — ตัวจริงถูกเก็บในโปรไฟล์อยู่แล้ว"""
