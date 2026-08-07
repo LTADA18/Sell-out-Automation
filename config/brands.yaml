@@ -8,6 +8,8 @@
 #
 # ที่มา: เจ้าของงานยืนยัน 2026-08-06 ว่า powerstool (TikTok) กับ
 #        Powerstools (Shopee) เป็นร้านเดียวกัน
+#        เจ้าของงานยืนยัน 2026-08-07 ว่า Toolspartner กับ TNLTOOLSTORE
+#        เป็นร้านเดียวกัน (ทั้งคู่อยู่บน Shopee บัญชี tnltools เดียวกัน)
 
 brands:
   - name: "กัปตัน เอกสตีล"
@@ -34,8 +36,6 @@ brands:
   - name: "Smarttooltech"
     shops: [shopee_02]
 
-  - name: "Toolspartner"
-    shops: [shopee_03]
-
-  - name: "TNLTOOLSTORE"
-    shops: [shopee_08]
+  # 2 ร้านนี้อยู่บน Shopee ทั้งคู่ ใช้บัญชี tnltools เดียวกัน
+  - name: "TNLTOOLSTORE (Toolspartner)"
+    shops: [shopee_03, shopee_08]

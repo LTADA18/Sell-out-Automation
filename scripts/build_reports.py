@@ -14,6 +14,7 @@ r"""สร้างรายงานย้อนหลัง 1 ม.ค. – 31 
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -68,6 +69,13 @@ def write_sheet(ws, header: list[str], rows: list[list], text_idx: set[int]) -> 
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only-brands", action="store_true",
+                    help="ทำเฉพาะไฟล์รายแบรนด์ ไม่สร้างไฟล์รวมใหม่ "
+                         "(ใช้ตอนแก้การจับกลุ่มใน brands.yaml — ไฟล์รวมไม่เปลี่ยน "
+                         "เพราะทุกร้านอยู่ชีทเดียวอยู่แล้ว ไม่ได้แบ่งตามแบรนด์)")
+    args = ap.parse_args()
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     header: list[str] | None = None
@@ -98,21 +106,26 @@ def main() -> int:
     print(f"\nรวมทั้งหมด {total:,} แถว จาก {len(by_shop)} ร้าน\n")
 
     # ── ไฟล์รวมทุกร้าน ────────────────────────────────────────
-    all_rows = [r for rows in by_shop.values() for r in rows]
-    wb = Workbook(write_only=True)
-    for i in range(0, max(len(all_rows), 1), MAX_ROWS):
-        chunk = all_rows[i:i + MAX_ROWS]
-        name = "ALL" if i == 0 else f"ALL_{i // MAX_ROWS + 1}"
-        write_sheet(wb.create_sheet(name), header, chunk, text_idx)
-        print(f"  ชีท {name}: {len(chunk):,} แถว")
     p_all = OUT / f"ทุกร้านทุกแพลตฟอร์ม_{PERIOD}.xlsx"
-    wb.save(p_all)
-    print(f"✅ {p_all.name}  ({p_all.stat().st_size / 1024 / 1024:.1f} MB)\n")
+    if args.only_brands and p_all.exists():
+        print(f"ข้ามไฟล์รวม — ใช้ของเดิม {p_all.name} "
+              f"({p_all.stat().st_size / 1024 / 1024:.1f} MB)\n")
+    else:
+        all_rows = [r for rows in by_shop.values() for r in rows]
+        wb = Workbook(write_only=True)
+        for i in range(0, max(len(all_rows), 1), MAX_ROWS):
+            chunk = all_rows[i:i + MAX_ROWS]
+            name = "ALL" if i == 0 else f"ALL_{i // MAX_ROWS + 1}"
+            write_sheet(wb.create_sheet(name), header, chunk, text_idx)
+            print(f"  ชีท {name}: {len(chunk):,} แถว")
+        wb.save(p_all)
+        print(f"✅ {p_all.name}  ({p_all.stat().st_size / 1024 / 1024:.1f} MB)\n")
 
     # ── ไฟล์รายแบรนด์ ────────────────────────────────────────
     brands = yaml.safe_load((PROJECT_ROOT / "config" / "brands.yaml")
                             .read_text(encoding="utf-8"))["brands"]
     print(f"=== ไฟล์รายแบรนด์ {len(brands)} ไฟล์ ===")
+    keep = {p_all.name}
     for b in brands:
         rows = [r for sid in b["shops"] for r in by_shop.get(sid, [])]
         wb = Workbook(write_only=True)
@@ -134,7 +147,16 @@ def main() -> int:
         safe = "".join(ch for ch in b["name"] if ch not in '\\/:*?"<>|').strip()
         path = OUT / f"{safe}_{PERIOD}.xlsx"
         wb.save(path)
+        keep.add(path.name)
         print(f"  {b['name'][:24]:<26} รวม {len(rows):>7,} · {' · '.join(counts)}")
+
+    # ลบไฟล์แบรนด์เก่าที่ไม่ตรงกับ brands.yaml ปัจจุบัน
+    # ถ้าไม่ลบ พอยุบ 2 แบรนด์เป็นแบรนด์เดียว ไฟล์เดิมทั้ง 2 จะค้างอยู่
+    # เจ้าของงานจะเห็นไฟล์เกินและมีข้อมูลซ้ำซ้อนโดยไม่รู้ว่าอันไหนของจริง
+    stale = [f for f in OUT.glob("*.xlsx") if f.name not in keep]
+    for f in stale:
+        f.unlink()
+        print(f"  🗑  ลบไฟล์เก่าที่ไม่ตรงกับการจับกลุ่มปัจจุบัน: {f.name}")
 
     print(f"\nไฟล์ทั้งหมดอยู่ที่ {OUT}")
     return 0
