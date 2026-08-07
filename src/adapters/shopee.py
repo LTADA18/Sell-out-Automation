@@ -18,6 +18,7 @@ flow อ้างอิงจากวิดีโอที่ผู้ใช้
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -106,8 +107,13 @@ class ShopeeAdapter(PlaywrightAdapter):
         self.api_calls += 1
         page.wait_for_timeout(9000)
 
-        self._enter_shop(page)
+        # ⚠️ ลำดับสำคัญ: ต้องตรวจ/ต่ออายุ login ให้เสร็จ "ก่อน" เลือกร้าน
+        #    ของเดิมเลือกร้านก่อน ซึ่งถ้ายังไม่ล็อกอินมันจะ return ทันที
+        #    พอ auto_relogin ทำงานเสร็จจะกลับมาอยู่หน้าเลือกร้าน แต่ขั้นเลือกร้าน
+        #    ผ่านไปแล้ว → ค้างที่ /portal/shop แล้วหาปุ่มดาวน์โหลดไม่เจอ
+        #    (เจอจริง 2026-08-07 ตอน auto_relogin ใช้ได้ครั้งแรก)
         self._ensure_logged_in(page, self.orders_url)
+        self._enter_shop(page)
         self._dismiss_onboarding(page)
 
         try:
@@ -134,6 +140,22 @@ class ShopeeAdapter(PlaywrightAdapter):
                         return txt.split("\n")[0].strip()
             except Exception:                            # noqa: BLE001
                 continue
+
+        # ⚠️ ทางถอย: อ่านจากแถบหัวเว็บตรง ๆ
+        #    หน้าภาษาอังกฤษใช้ class คนละชุด ตัวเลือกด้านบนจึงหาไม่เจอ
+        #    แล้วโค้ดจะเข้าใจผิดว่า "อยู่ผิดร้าน" → บังคับไปหน้าเลือกร้าน
+        #    ซึ่ง Shopee เด้งกลับเพราะเลือกร้านไว้แล้ว → ตารางว่าง → รายงานผิดว่าไม่มีร้าน
+        #    (เจอจริง 2026-08-07 กับ toolspartner ที่หน้าเป็นอังกฤษ)
+        try:
+            head = page.locator(".shopee-header-bar, header, [class*='header-bar']").first
+            if head.count():
+                txt = (head.inner_text(timeout=2500) or "")
+                want = (self.shop.web_name or "").strip().lower()
+                for line in (x.strip() for x in txt.split("\n") if x.strip()):
+                    if want and line.lower() == want:
+                        return line
+        except Exception:                                # noqa: BLE001
+            pass
         return None
 
     def _enter_shop(self, page) -> None:
@@ -171,18 +193,40 @@ class ShopeeAdapter(PlaywrightAdapter):
             #    พาไปที่ next ทันที = สลับร้านไม่ได้เลย ติดที่ร้านเดิมตลอด
             #    (เจอจริง 2026-08-05 กับ shopee_08 — diag ยืนยันว่าตัดออกแล้วเข้าได้)
             #    ตัวเลือกสำรองยังคง ?next= ไว้เผื่อ Shopee เปลี่ยนพฤติกรรมอีก
-            for url in (f"{self.base_url}/portal/shop",
-                        f"{self.base_url}/portal/shop?next=%2Fportal%2Fsale%2Forder"):
+            # ⚠️ ต้องเช็คว่า "มีตารางร้านจริง" ไม่ใช่แค่ URL ถูก
+            #    /portal/shop แบบไม่มีพารามิเตอร์บางครั้งเรนเดอร์ว่างเปล่า (tr=0)
+            #    ของเดิมหยุดที่ URL แรกเพราะ URL ตรง แล้วไปเจอตารางว่าง
+            #    รายงานผิดว่า "บัญชีนี้ไม่มีร้านชื่อ ..." (เจอจริง 2026-08-07)
+            for url in (f"{self.base_url}/portal/shop?next=%2Fportal%2Fsale%2Forder",
+                        f"{self.base_url}/portal/shop"):
                 page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(8000)
-                if "/portal/shop" in page.url:
+                for _ in range(6):
+                    page.wait_for_timeout(2500)
+                    if page.locator("tr").count() > 1:
+                        break
+                if "/portal/shop" in page.url and page.locator("tr").count() > 1:
                     break
             if "/portal/shop" not in page.url:
+                # ⚠️ Shopee เด้งออกจากหน้าเลือกร้าน = มีร้านเปิดอยู่แล้ว
+                #    ถ้าชื่อบนหน้าตรงกับที่ต้องการ ถือว่าอยู่ถูกร้าน ไม่ต้องบังคับต่อ
+                #    (ไม่งั้นจะพังทั้งที่อยู่ถูกร้าน — เจอจริง 2026-08-07)
+                again = self._current_shop_name(page)
+                if again and again.lower() == want.lower():
+                    log.info("shopee_already_on_wanted_shop",
+                             shop_id=self.shop.shop_id, shop=again)
+                    return
                 raise AdapterError(
                     ErrorType.PARSE_ERROR,
                     f"บังคับกลับไปหน้าเลือกร้านไม่ได้ (อยู่ที่ {page.url[:80]}) "
                     f"— เสี่ยงดึงข้อมูลผิดร้าน จึงหยุดไว้ก่อน",
                 )
+        # ⚠️ ตารางร้านเรนเดอร์ช้ากว่า domcontentloaded — ถ้าไม่รอจะได้ [] แล้วรายงาน
+        #    ผิดว่า "บัญชีนี้ไม่มีร้านชื่อ ..." ทั้งที่มีอยู่ (เจอจริง 2026-08-07)
+        for _ in range(6):
+            if page.locator("tr").count() > 1:
+                break
+            page.wait_for_timeout(2500)
+
         row = page.locator(f'tr:has-text("{want}")').first
         if row.count() == 0:
             names = []
@@ -263,6 +307,16 @@ class ShopeeAdapter(PlaywrightAdapter):
                      url=page.url[:70])
             return True
 
+        # ── ทางหลัก: เข้าผ่าน "บัญชีหลัก/บัญชีย่อย" ที่ Shopee จำไว้ ────────
+        # ⚠️ วิธีนี้ไม่ต้องใช้รหัสผ่านเลย — Shopee เก็บบัญชีไว้ใน account chooser
+        #    (เจ้าของงานบันทึกวิดีโอวิธีทำไว้ให้ 2026-08-07 085618)
+        #    ขั้นตอน: กด "เข้าสู่ระบบด้วยบัญชีหลัก/บัญชีย่อย" → หน้า "เลือกบัญชีผู้ใช้"
+        #             → กดชื่อบัญชี → เข้าหลังบ้านได้เลย
+        #    ทางนี้ต้องลองก่อนการเติมรหัสผ่านเสมอ เพราะได้ผลแม้ Chrome ไม่ได้จำรหัส
+        if self._relogin_via_account_chooser(page):
+            return True
+
+        # ── ทางสำรอง: ฟอร์มที่ Chrome เติมรหัสไว้ ────────────────────────
         # Chrome เติมรหัสช้ากว่า domcontentloaded — ต้อง poll ไม่ใช่รอเวลาตายตัว
         filled = 0
         for _ in range(10):
@@ -308,6 +362,91 @@ class ShopeeAdapter(PlaywrightAdapter):
                     continue
             if not any(h in page.url.lower() for h in ("login", "signin")):
                 log.info("relogin_ok", shop_id=self.shop.shop_id, url=page.url[:70])
+                return True
+        return False
+
+    def _relogin_via_account_chooser(self, page) -> bool:
+        """เข้าระบบผ่านบัญชีที่ Shopee จำไว้ — ไม่ต้องใช้รหัสผ่าน
+
+        ที่มา: เจ้าของงานบันทึกวิดีโอวิธีทำไว้ให้ (2026-08-07)
+        หน้า login มีปุ่มล่างสุด "เข้าสู่ระบบด้วยบัญชีหลัก/บัญชีย่อย"
+        กดแล้วไปหน้า account chooser ที่มีชื่อบัญชีรออยู่ กดชื่อก็เข้าได้เลย
+
+        ⚠️ ต้องไม่ไปกด "เข้าสู่ระบบด้วยบัญชีอื่น" ซึ่งอยู่ในกล่องเดียวกัน
+           อันนั้นพาไปกรอกรหัสใหม่ ซึ่งเราทำไม่ได้
+        """
+        # ⚠️ ต้องเข้า accounts.shopee.co.th โดยตรง — ถ้าไปที่ base_url/account/signin
+        #    Shopee จะเด้งไป shopee.co.th/seller/login ซึ่งเป็นคนละหน้าและ
+        #    **ไม่มี** ปุ่มบัญชีหลัก/บัญชีย่อย (ยืนยันจาก DOM จริง 2026-08-07)
+        #    URL นี้ตรงกับที่เจ้าของงานใช้ในวิดีโอ
+        from urllib.parse import quote
+        page.goto(f"https://accounts.shopee.co.th/seller/login?next={quote(self.orders_url, safe='')}",
+                  wait_until="domcontentloaded")
+        page.wait_for_timeout(6000)
+        if not any(h in page.url.lower() for h in ("login", "signin")):
+            log.info("relogin_already_logged_in", shop_id=self.shop.shop_id)
+            return True
+
+        for sel in ('text=/เข้าสู่ระบบด้วยบัญชีหลัก/',
+                    'text=/บัญชีหลัก/',
+                    'text=/บัญชีย่อย/',
+                    'text=/Main Account.*Sub.?Account/i'):
+            try:
+                loc = page.locator(sel).first
+                if loc.count() == 0:
+                    continue
+                loc.click(timeout=6000)
+                break
+            except Exception:                            # noqa: BLE001
+                continue
+        else:
+            log.info("relogin_no_account_chooser_link", shop_id=self.shop.shop_id)
+            return False
+
+        page.wait_for_timeout(5000)
+        if "accountchooser" not in page.url.lower() and "signin/oauth" not in page.url.lower():
+            log.info("relogin_chooser_not_reached", shop_id=self.shop.shop_id,
+                     url=page.url[:70])
+            return False
+
+        # กดชื่อบัญชีในกล่อง — ถ้ารู้ชื่อบัญชีจาก .env ให้เล็งตัวนั้นก่อน
+        want = (self.shop.account or "").strip()
+        picked = False
+        if want:
+            try:
+                row = page.locator(f'text="{want}"').first
+                if row.count():
+                    row.click(timeout=5000)
+                    picked = True
+            except Exception:                            # noqa: BLE001
+                pass
+        if not picked:
+            # ชื่อบัญชีของ Shopee อยู่ในรูป "user:sub" — เล็งด้วยรูปแบบนั้น
+            # เลี่ยงปุ่ม "เข้าสู่ระบบด้วยบัญชีอื่น" ที่อยู่กล่องเดียวกัน
+            try:
+                row = page.locator('a:has-text(":"), [class*="account"] a, li a').first
+                if row.count() == 0:
+                    row = page.get_by_text(re.compile(r"^[\w.\-]+:[\w.\-]+$")).first
+                row.click(timeout=6000)
+                picked = True
+            except Exception as exc:                     # noqa: BLE001
+                log.info("relogin_pick_account_failed", shop_id=self.shop.shop_id,
+                         err=str(exc)[:60])
+                return False
+
+        for _ in range(12):
+            page.wait_for_timeout(1500)
+            for sel in SEL["challenge"]:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=600):
+                        self._screenshot_on_error(page, "relogin_challenge")
+                        log.warning("relogin_challenge", shop_id=self.shop.shop_id)
+                        return False
+                except Exception:                        # noqa: BLE001
+                    continue
+            if not any(h in page.url.lower() for h in ("login", "signin", "accountchooser")):
+                log.info("relogin_via_chooser_ok", shop_id=self.shop.shop_id,
+                         url=page.url[:70])
                 return True
         return False
 
