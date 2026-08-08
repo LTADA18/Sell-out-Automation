@@ -59,6 +59,18 @@ def test_no_bare_assert_logged_in_in_export_path(cls: type) -> None:
     )
 
 
+@pytest.mark.parametrize("cls", ADAPTERS, ids=lambda c: c.__name__)
+def test_adapter_exposes_orders_url(cls: type) -> None:
+    """ทุก adapter ต้องบอกได้ว่าหน้าคำสั่งซื้ออยู่ที่ไหน
+
+    keepalive กับตัวเช็ค login ใช้ค่านี้ ถ้าขาดจะพังตอนรันจริงเท่านั้น
+    (เจอจริง 2026-08-08: keepalive ล้มทั้ง 5 ร้านเพราะ TiktokAdapter ไม่มี orders_url)
+    """
+    assert isinstance(getattr(cls, "orders_url", None), property), (
+        f"{cls.__name__} ไม่มี property orders_url"
+    )
+
+
 def test_ensure_logged_in_actually_calls_auto_relogin() -> None:
     """ตัวจริงที่เป็นหัวใจ — ถ้าวันหนึ่งมีคนแก้ _ensure_logged_in จนไม่เรียก relogin แล้ว
     เทสต์ข้างบนทั้งหมดจะผ่านแต่ระบบพังเงียบ ๆ"""

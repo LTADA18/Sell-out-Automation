@@ -68,7 +68,28 @@ def main() -> int:
     ap.add_argument("--shop", help="เฉพาะร้านเดียว")
     ap.add_argument("--max-age", type=float, default=8.0,
                     help="แตะเฉพาะร้านที่ session เก่ากว่ากี่ชั่วโมง (ค่าเริ่มต้น 8)")
+    ap.add_argument("--daily-at", default="08:30",
+                    help="เวลารอบดึงรายวัน — ตัวนี้จะไม่รันช่วงใกล้เวลานั้น")
+    ap.add_argument("--guard-min", type=int, default=45,
+                    help="ห้ามรันภายในกี่นาทีก่อนรอบดึง (ค่าเริ่มต้น 45)")
     args = ap.parse_args()
+
+    # ⚠️ กันชนกับรอบดึงรายวัน
+    #    ถ้าเครื่องหลับตอน 20:00 งานนี้จะค้างไว้แล้ว StartWhenAvailable ตามเก็บ
+    #    ทันทีที่เครื่องตื่น ถ้าบังเอิญตื่น 08:29 มันจะคว้า run_lock ไว้
+    #    พอ 08:30 รอบดึงจะเจอล็อกแล้วออกทันทีโดยไม่ดึงอะไรเลย — เสียทั้งวัน
+    #    (ยังไม่เคยเกิด แต่เป็นไปได้จริง จึงกันไว้ก่อน)
+    try:
+        hh, mm = (int(x) for x in args.daily_at.split(":"))
+        now = datetime.now()
+        daily = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        mins_to_daily = (daily - now).total_seconds() / 60
+        if 0 <= mins_to_daily <= args.guard_min:
+            print(f"อีก {mins_to_daily:.0f} นาทีจะถึงรอบดึง {args.daily_at} — "
+                  f"ข้ามรอบนี้ ไม่ไปแย่งล็อก")
+            return 0
+    except ValueError:
+        pass                                             # รูปแบบเวลาเพี้ยน ก็ทำงานต่อตามปกติ
 
     cfg = load_config()
     setup_logging(PROJECT_ROOT / cfg.settings.paths.logs_dir, "keepalive")

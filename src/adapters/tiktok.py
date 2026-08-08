@@ -73,6 +73,15 @@ class TiktokAdapter(PlaywrightAdapter):
     base_url_env = "TIKTOK_SELLER_URL"
     login_path = "/account/login"
 
+    @property
+    def orders_url(self) -> str:
+        """หน้าคำสั่งซื้อแบบไม่ใส่ช่วงวันที่ — ใช้เช็ค login / ต่ออายุ session
+
+        ⚠️ ห้ามใช้ URL นี้ตอนดึงข้อมูล ต้องใส่ time_order_created[] ด้วยเสมอ
+           ไม่งั้น TikTok จะ default เป็น 12 เดือนย้อนหลัง (ดู _export)
+        """
+        return f"{self.base_url}/order"
+
     def auto_relogin(self, page) -> bool:
         """ต่ออายุ session เองโดยกดปุ่มบนฟอร์มที่ Chrome เติมรหัสไว้แล้ว
 

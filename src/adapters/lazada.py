@@ -60,8 +60,13 @@ class LazadaAdapter(PlaywrightAdapter):
     base_url_env = "LAZADA_SELLER_URL"
     login_path = "/apps/seller/login"
 
+    @property
+    def orders_url(self) -> str:
+        """หน้าคำสั่งซื้อ — ใช้ทั้งตอนดึงและตอนเช็ค/ต่ออายุ session"""
+        return f"{self.base_url}/apps/order/list?oldVersion=1"
+
     def _export(self, page, date_from: date, date_to: date) -> Path:
-        url = f"{self.base_url}/apps/order/list?oldVersion=1"
+        url = self.orders_url
         page.goto(url, wait_until="domcontentloaded")
         self.api_calls += 1
         page.wait_for_timeout(3000)                      # หน้านี้ render ช้า รอ widget ขึ้นครบ
