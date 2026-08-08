@@ -59,7 +59,9 @@ try {
 if ($Mail) {
     try {
         # --only-if-complete: เจ้าของงานสั่ง 2026-08-07 ว่าไม่ครบทุกร้านห้ามส่ง
-        & $py -m src.cli notify --to $MailTo --cc $MailCc --only-if-complete
+        # --skip-if-sent    : กันส่งซ้ำ ถ้าวันนั้นมีการส่งไปแล้ว (เช่นสั่งรันมือก่อน
+        #                     แล้วตัวตั้งเวลายิงตามอีกรอบ) ผู้รับ 5 คนจะได้ไม่ได้เมลซ้ำ
+        & $py -m src.cli notify --to $MailTo --cc $MailCc --only-if-complete --skip-if-sent
     } catch {
         Write-Host "ส่งอีเมลไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
     }

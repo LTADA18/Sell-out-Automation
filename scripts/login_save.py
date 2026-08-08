@@ -58,26 +58,59 @@ def main() -> int:
         print()
         print(f"  ร้าน : {s.display_name} ({s.shop_id})")
         print(f"  ล็อกอินในหน้าต่างที่เปิดขึ้นมาได้เลย — ไม่ต้องกดอะไรอื่น")
-        print(f"  ระบบจะลองเข้าหน้าคำสั่งซื้อทุก 10 วินาที พอเข้าได้จะเซฟให้เอง")
+        print(f"  ระบบจะ 'ดูเฉย ๆ' ไม่รีหน้า พอล็อกอินเสร็จจะเซฟให้เอง")
         print(f"  (รอสูงสุด {args.wait} นาที)")
         print()
 
+        # ⚠️ ห้ามใช้ page.goto() วนซ้ำเพื่อเช็คสถานะ
+        #    ของเดิมนำทางไปหน้าคำสั่งซื้อทุก 10 วินาที ซึ่งไป "รีหน้าที่ผู้ใช้กำลังกรอกอยู่"
+        #    ฟอร์มล็อกอินของ TikTok มีหลายขั้น (กรอกอีเมล -> ขอรหัส -> กรอกรหัส)
+        #    โดนรีกลางคันแล้วต้องเริ่มใหม่ทุกรอบ ล็อกอินไม่มีวันสำเร็จ
+        #    (เจอจริง 2026-08-08 — เจ้าของงานกำลังกรอกอยู่แล้วหน้าเด้งกลับ)
+        #
+        #    ตัวใหม่ "ดูเฉย ๆ" — อ่าน URL ของทุกแท็บใน context โดยไม่แตะหน้า
+        #    ต้องดูทุกแท็บ เพราะบางแพลตฟอร์มเปิดแท็บใหม่ตอนล็อกอินเสร็จ
+        #    แล้วค่อยนำทางครั้งเดียวตอนท้ายเพื่อยืนยัน
         deadline = time.time() + args.wait * 60
+        stable = 0
+        last_report = 0.0
         while time.time() < deadline:
-            time.sleep(10)
+            time.sleep(3)
             try:
-                page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(4000)
-                cur = page.url.lower()
+                urls = [pg.url for pg in adapter._context.pages if pg.url]
             except Exception as exc:                     # noqa: BLE001
                 print(f"  หน้าต่างถูกปิด — ยังไม่ได้เซฟ ({str(exc)[:50]})")
                 return 1
-            if any(h in cur for h in LOGIN_URL_HINTS):
-                print(f"  ยังไม่ล็อกอิน ({page.url[:60]})", flush=True)
+            if not urls:
                 continue
-            print(f"  ✅ เข้าหน้าคำสั่งซื้อได้แล้ว: {page.url[:70]}")
-            ok = True
-            break
+
+            done = [u for u in urls
+                    if "about:blank" not in u
+                    and not any(h in u.lower() for h in LOGIN_URL_HINTS)]
+            if done:
+                # ต้องนิ่ง 2 รอบติด กันเข้าใจผิดตอนหน้ากำลังเด้งระหว่างขั้นตอน
+                stable += 1
+                if stable >= 2:
+                    print(f"  ตรวจพบว่าล็อกอินแล้ว: {done[0][:70]}")
+                    break
+            else:
+                stable = 0
+                if time.time() - last_report > 30:
+                    print(f"  ยังอยู่หน้า login ({urls[0][:60]})", flush=True)
+                    last_report = time.time()
+
+        # ยืนยันครั้งเดียว — ทำหลังผู้ใช้ล็อกอินเสร็จแล้วเท่านั้น จึงไม่ไปรบกวนฟอร์ม
+        if stable >= 2:
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_timeout(4000)
+                if not any(h in page.url.lower() for h in LOGIN_URL_HINTS):
+                    print(f"  ✅ เข้าหน้าคำสั่งซื้อได้แล้ว: {page.url[:70]}")
+                    ok = True
+                else:
+                    print(f"  ⚠️ ยังเด้งกลับหน้า login ({page.url[:60]})")
+            except Exception as exc:                     # noqa: BLE001
+                print(f"  ยืนยันไม่ได้ ({str(exc)[:60]})")
 
         if not ok:
             print("  หมดเวลารอ — ยังไม่ได้เซฟ")

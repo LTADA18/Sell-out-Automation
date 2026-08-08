@@ -18,7 +18,9 @@ param(
     [switch]$NoExcel,
     [switch]$Draft,
     # กันส่งซ้ำ — ถ้ารอบดึงส่งอีเมลของวันนี้ไปแล้ว ให้ออกทันที
-    [switch]$SkipIfSent
+    [switch]$SkipIfSent,
+    # ส่งทั้งที่ยังไม่ครบทุกร้าน — ต้องจงใจใส่เองเท่านั้น
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +41,12 @@ if ($Date)    { $cliArgs += @("--date", $Date) }
 if ($NoExcel)    { $cliArgs += "--no-excel" }
 if ($Draft)      { $cliArgs += "--draft" }
 if ($SkipIfSent) { $cliArgs += "--skip-if-sent" }
+
+# ⚠️ กฎที่เจ้าของงานสั่งไว้ 2026-08-07: ไม่ครบ 13 ร้าน ห้ามส่งเมล
+#    ของเดิมใส่ไว้แค่ใน run_daily.ps1 ตัวนี้ซึ่งเป็นตัวตั้งเวลา 09:00 ไม่มี
+#    ผลคือ 2026-08-08 มันส่งอีเมลออกไปตอนได้แค่ 9/13 ร้าน — ผิดกฎเต็ม ๆ
+#    ใส่เป็นค่าเริ่มต้น ถ้าจงใจอยากส่งทั้งที่ไม่ครบให้ใช้ -Force
+if (-not $Force) { $cliArgs += "--only-if-complete" }
 
 Write-Host "ส่งสรุปผลการดึง $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 & $py @cliArgs

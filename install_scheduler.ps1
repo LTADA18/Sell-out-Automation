@@ -14,6 +14,10 @@ param(
     # เว้นห่าง 30 นาทีให้รอบดึง (~15-20 นาที) จบก่อนถึงรอบอีเมล
     [string]$Time = "08:30",
     [string]$MailTime = "09:00",
+    # 20:00 = ราว 12 ชม. หลังรอบเช้า — จุดกึ่งกลางพอดี
+    # session ของ TikTok อยู่ได้ ~24 ชม. ถ้าแตะทุก 12 ชม. อายุจะไม่มีวันแตะเส้นตาย
+    # (วัดจริง 2026-08-08: ร้านที่ session อายุ 23.8 ชม. ตายหมด ที่ 21 ชม. รอด)
+    [string]$KeepAliveTime = "20:00",
     [switch]$Status,
     [switch]$RunNow,
     [switch]$Remove
@@ -24,8 +28,10 @@ Set-Location $PSScriptRoot
 
 $TaskName = "DealerMKP-DailyOrders"
 $MailTask = "DealerMKP-DailyMail"
+$KeepTask = "DealerMKP-KeepAlive"
 $script   = Join-Path $PSScriptRoot "run_daily.ps1"
 $mailScr  = Join-Path $PSScriptRoot "send_report.ps1"
+$keepScr  = Join-Path $PSScriptRoot "keepalive.ps1"
 
 function Show-One {
     param([string]$Name)
@@ -63,6 +69,9 @@ function Show-Status {
     Write-Host ""
     Write-Host "── งานส่งอีเมล ──"
     Show-One -Name $MailTask
+    Write-Host ""
+    Write-Host "── งานต่ออายุ session ──"
+    Show-One -Name $KeepTask
 }
 
 if ($Status) { Show-Status; exit 0 }
@@ -74,7 +83,7 @@ if ($RunNow) {
 }
 
 if ($Remove) {
-    foreach ($n in @($TaskName, $MailTask)) {
+    foreach ($n in @($TaskName, $MailTask, $KeepTask)) {
         if (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName $n -Confirm:$false
             Write-Host "ถอด $n ออกแล้ว" -ForegroundColor Green
@@ -179,6 +188,41 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 Write-Host "ติดตั้ง $MailTask แล้ว — ส่งอีเมลทุกวัน $MailTime" -ForegroundColor Green
+
+# ── งานต่ออายุ session ─────────────────────────────────────────
+# ตัวนี้ไม่ดึงข้อมูล แค่เปิดหน้าหลังบ้านแล้วเซฟ cookie ชุดใหม่
+#
+# ที่มา (วัดจริง 2026-08-08): session ของ TikTok อยู่ได้ ~24 ชม.
+# รอบรายวันรันเวลาเดิมทุกวัน = ห่างกัน 24 ชม. เป๊ะ จึงนั่งบนเส้นแบ่งพอดี
+# วันนั้น tiktok_01/03/04/05 อายุ 23.8-23.9 ชม. ตายหมด ส่วน tiktok_02 อายุ 21 ชม. รอด
+# แตะกลางวันหนึ่งครั้ง อายุจึงไม่มีวันแตะ 24 ชม. -> ไม่ต้องล็อกอินใหม่ -> ไม่ต้องขอ OTP
+#
+# ใช้ run_lock ตัวเดียวกับรอบดึง ถ้าชนกันจะข้ามรอบไปเงียบ ๆ ไม่ใช่ error
+$keepAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$keepScr`"" `
+    -WorkingDirectory $PSScriptRoot
+
+$keepSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
+    -WakeToRun `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 20) `
+    -RestartCount 1 `
+    -RestartInterval (New-TimeSpan -Minutes 15)
+
+Register-ScheduledTask `
+    -TaskName $KeepTask `
+    -Action $keepAction `
+    -Trigger (New-ScheduledTaskTrigger -Daily -At $KeepAliveTime) `
+    -Settings $keepSettings `
+    -Principal $principal `
+    -Description "ต่ออายุ session ก่อนหมด — กันไม่ให้ต้องล็อกอินใหม่และขอ OTP" `
+    -Force | Out-Null
+
+Write-Host "ติดตั้ง $KeepTask แล้ว — ต่ออายุ session ทุกวัน $KeepAliveTime" -ForegroundColor Green
 Write-Host ""
 Show-Status
 Write-Host ""

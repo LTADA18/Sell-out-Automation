@@ -95,6 +95,23 @@ class TiktokAdapter(PlaywrightAdapter):
                      url=page.url[:70])
             return True
 
+        # หน้า login ของ TikTok ตั้งค่าเริ่มต้นเป็นโหมด "ส่งรหัสยืนยัน" (OTP)
+        # ต้องกดสลับไปโหมดรหัสผ่านก่อน ไม่งั้นไม่มีช่องรหัสผ่านให้ Chrome เติมเลย
+        # (ยืนยันจากหน้าจริง 2026-08-08: มีปุ่ม "ล็อกอินด้วยรหัสผ่าน" อยู่บนหน้า)
+        # ⚠️ ไม่ใช่การหลบ OTP — เป็นการเลือกวิธีล็อกอินที่เว็บมีให้อยู่แล้ว
+        #    ถ้า TikTok ยังขอ OTP อยู่ดี จะถูกจับที่ลูปเช็ค challenge ด้านล่างแล้วหยุด
+        for label in ("ล็อกอินด้วยรหัสผ่าน", "Log in with password", "Login with password"):
+            try:
+                btn = page.get_by_text(label, exact=True).first
+                if btn.is_visible(timeout=1500):
+                    btn.click(timeout=4000)
+                    page.wait_for_timeout(2000)
+                    log.info("relogin_switched_to_password_mode",
+                             shop_id=self.shop.shop_id, label=label)
+                    break
+            except Exception:                            # noqa: BLE001
+                continue
+
         filled = 0
         for _ in range(10):
             page.wait_for_timeout(1500)
@@ -156,7 +173,13 @@ class TiktokAdapter(PlaywrightAdapter):
         page.goto(url, wait_until="domcontentloaded")
         self.api_calls += 1
         page.wait_for_timeout(4000)
-        self._assert_logged_in(page)
+
+        # ⚠️ ต้องเป็น _ensure_logged_in ไม่ใช่ _assert_logged_in
+        #    _assert_logged_in โยน AUTH_EXPIRED ทันทีโดยไม่ลองต่ออายุ session เลย
+        #    ทำให้ auto_relogin ที่เขียนไว้ไม่เคยถูกเรียกใช้ — ร้าน TikTok จึงพังทุกครั้ง
+        #    ที่ cookie หมดอายุ แล้วต้องให้คนมาล็อกอินมือ
+        #    (เจอจริง 2026-08-08 กับ tiktok_01 — Lazada/Shopee เรียกถูกมาตลอด มีแต่ TikTok ที่พลาด)
+        self._ensure_logged_in(page, url)
         log.info("tiktok_range", shop_id=self.shop.shop_id, start_ms=start_ms, end_ms=end_ms)
 
         try:
