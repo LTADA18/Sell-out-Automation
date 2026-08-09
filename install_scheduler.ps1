@@ -14,10 +14,15 @@ param(
     # เว้นห่าง 30 นาทีให้รอบดึง (~15-20 นาที) จบก่อนถึงรอบอีเมล
     [string]$Time = "08:30",
     [string]$MailTime = "09:00",
-    # 20:00 = ราว 12 ชม. หลังรอบเช้า — จุดกึ่งกลางพอดี
-    # session ของ TikTok อยู่ได้ ~24 ชม. ถ้าแตะทุก 12 ชม. อายุจะไม่มีวันแตะเส้นตาย
-    # (วัดจริง 2026-08-08: ร้านที่ session อายุ 23.8 ชม. ตายหมด ที่ 21 ชม. รอด)
-    [string]$KeepAliveTime = "20:00",
+    # ⚠️ ต้องมีมากกว่า 1 เวลา — 20:00 อย่างเดียวพลาด 2 คืนติด (8 และ 9 ส.ค.)
+    #    เพราะโน้ตบุ๊กเข้า Modern Standby ตอนเย็น งานจึงยิงไม่ได้
+    #    StartWhenAvailable ตามเก็บให้ก็จริง แต่ไปรันตอนดึกหรือเช้าซึ่งสายเกินไป
+    #
+    # 13:00 = ช่วงเครื่องเปิดใช้งานแน่นอน (เวลาทำงาน) เป็นตัวหลัก
+    # 20:00 = เผื่อไว้ ถ้าเครื่องยังเปิดอยู่
+    # แตะครั้งใดครั้งหนึ่งสำเร็จ อายุตอน 08:30 ก็ไม่เกิน ~19.5 ชม. ซึ่งต่ำกว่าเส้นตาย
+    # (วัดจริง: 23.8 ชม. ตาย / 21.0 ชม. รอด)
+    [string[]]$KeepAliveTimes = @("13:00", "20:00"),
     [switch]$Status,
     [switch]$RunNow,
     [switch]$Remove
@@ -213,16 +218,18 @@ $keepSettings = New-ScheduledTaskSettingsSet `
     -RestartCount 1 `
     -RestartInterval (New-TimeSpan -Minutes 15)
 
+$keepTriggers = @($KeepAliveTimes | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
+
 Register-ScheduledTask `
     -TaskName $KeepTask `
     -Action $keepAction `
-    -Trigger (New-ScheduledTaskTrigger -Daily -At $KeepAliveTime) `
+    -Trigger $keepTriggers `
     -Settings $keepSettings `
     -Principal $principal `
     -Description "ต่ออายุ session ก่อนหมด — กันไม่ให้ต้องล็อกอินใหม่และขอ OTP" `
     -Force | Out-Null
 
-Write-Host "ติดตั้ง $KeepTask แล้ว — ต่ออายุ session ทุกวัน $KeepAliveTime" -ForegroundColor Green
+Write-Host "ติดตั้ง $KeepTask แล้ว — ต่ออายุ session ทุกวัน $($KeepAliveTimes -join ' และ ')" -ForegroundColor Green
 Write-Host ""
 Show-Status
 Write-Host ""

@@ -91,6 +91,54 @@ if old_sess:
 n_prof = len([p for p in prof_dir.iterdir() if p.is_dir()]) if prof_dir.exists() else 0
 print(f"     โปรไฟล์เบราว์เซอร์ {n_prof} ชุด")
 
+# ── 3.1 อายุ session ตอนรอบดึงถัดไป — ตัวที่พลาดมาแล้ว 2 ครั้ง ──
+#
+# ⚠️ เช็ค "อายุตอนนี้" อย่างเดียวไม่พอ ต้องคิดไปถึงตอนรอบดึงจริง
+#    2026-08-09 21:49 preflight บอก "พร้อมครบทุกจุด" ทั้งที่ TikTok ทุกร้าน
+#    จะอายุ 24.0 ชม. พอดีตอน 08:30 ซึ่งคือเส้นตายที่วัดได้จริง
+#    ถ้าเชื่อตามนั้นแล้วไปนอน เช้ามาก็พังเหมือนวันที่ 8
+#
+# เส้นตายจากการวัดจริง: 23.8 ชม. ตาย / 21.0 ชม. รอด
+DEADLINE_H = 23.0
+WARN_H = 20.0
+
+head("3.1 อายุ session ตอนรอบดึงถัดไป")
+_now = datetime.now()
+_run = _now.replace(hour=8, minute=30, second=0, microsecond=0)
+if _run <= _now:
+    _run += timedelta(days=1)
+print(f"  รอบดึงถัดไป {_run:%d/%m %H:%M}")
+
+risky: list[str] = []
+for s in shops:
+    if s.platform != "tiktok":
+        continue                                          # Lazada/Shopee ต่ออายุเองได้ดีอยู่แล้ว
+    f = sess_dir / f"{s.profile_id}_state.json"
+    if not f.exists():
+        continue
+    age_at_run = (_run - datetime.fromtimestamp(f.stat().st_mtime)).total_seconds() / 3600
+    if age_at_run >= DEADLINE_H:
+        bad(f"{s.shop_id} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — เกินเส้นตาย "
+            f"(รัน .\\keepalive.ps1 ก่อนนอน)")
+        risky.append(s.shop_id)
+    elif age_at_run >= WARN_H:
+        warn(f"{s.shop_id} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — จ่อเส้น "
+             f"ต้องหวังพึ่ง keepalive 20:00")
+    else:
+        print(f"     ✅ {s.shop_id:<11} จะอายุ {age_at_run:.1f} ชม.")
+
+# keepalive ทำงานล่าสุดเมื่อไหร่ — ถ้าไม่ได้รันมาเกินวันครึ่งแปลว่ามันไม่ทำงาน
+ka_log = PROJECT_ROOT / "logs" / "run_keepalive.jsonl"   # ชื่อจริงที่ setup_logging เขียน
+if ka_log.exists():
+    ka_age = (datetime.now()
+              - datetime.fromtimestamp(ka_log.stat().st_mtime)).total_seconds() / 3600
+    if ka_age > 36:
+        warn(f"keepalive ไม่ได้ทำงานมา {ka_age:.0f} ชม. — ตัวตั้งเวลา 20:00 อาจไม่ยิง")
+    else:
+        print(f"     keepalive ทำงานล่าสุดเมื่อ {ka_age:.1f} ชม.ที่แล้ว")
+else:
+    warn("ยังไม่เคยมี log ของ keepalive")
+
 # ── 4. Chrome ค้าง — ต้นเหตุที่ทำให้เช้านี้เสียเวลาเป็นชั่วโมง ──
 head("4. Chrome ค้างจากรอบก่อน")
 try:
