@@ -12,6 +12,8 @@ param(
     [string]$Platform,
     [string]$Date,
     [switch]$SkipIfDone,
+    # ข้ามขั้นตรวจความพร้อม — ใช้ตอนสั่งดึงร้านเดียวซ้ำ ๆ จะได้ไม่เสียเวลา
+    [switch]$SkipPreflight,
     # ส่งอีเมลท้ายรอบ = การันตีว่าอีเมลออกหลังดึงเสร็จเสมอ
     # (เครื่องเป็นโน้ตบุ๊ก เปิด 8 โมง รอบดึงจะเริ่มตอนล็อกอิน ไม่ใช่ตี 6
     #  ถ้าตั้งอีเมลตามนาฬิกาจะส่งตอนข้อมูลยังไม่ครบ)
@@ -28,6 +30,27 @@ $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) {
     Write-Host "ไม่พบ .venv — รัน .\setup.ps1 ก่อน" -ForegroundColor Red
     exit 4
+}
+
+# ── ขั้นแรก: ตรวจความพร้อม + ซ่อมให้เองถ้าเจอว่าเสี่ยง ──────────
+#
+# ปิดช่องสุดท้ายที่เหลืออยู่: ถ้าเครื่องปิดทั้ง 13:00 และ 20:00
+# keepalive ที่ตั้งเวลาไว้จะไม่ได้ทำงานเลย พอถึง 08:30 session ก็อายุ ~24 ชม.
+# ซึ่งคือเส้นตายที่วัดได้จริง (23.8 ตาย / 21.0 รอด)
+#
+# ⚠️ ห้ามให้ขั้นนี้ทำให้รอบดึงล้ม — ถ้า preflight พังหรือซ่อมไม่ได้ ก็ต้องดึงต่อ
+#    ร้านที่ยังดึงได้ต้องได้ข้อมูล ไม่ใช่หยุดทั้งรอบเพราะร้านเดียวมีปัญหา
+if (-not $SkipPreflight) {
+    Write-Host "── ตรวจความพร้อมก่อนดึง ──" -ForegroundColor Cyan
+    try {
+        & $py -u scripts\preflight.py
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "preflight เจอปัญหาที่ซ่อมเองไม่ได้ — ดึงต่อไปก่อน แล้วดูรายละเอียดด้านบน" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "รัน preflight ไม่สำเร็จ (ไม่กระทบการดึง): $_" -ForegroundColor Yellow
+    }
+    Write-Host ""
 }
 
 $cliArgs = @("-m", "src.cli", "run")

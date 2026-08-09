@@ -153,8 +153,13 @@ if risky and not ARGS.no_fix:
             #    keepalive วัด "อายุตอนนี้" แต่ preflight ตัดสินจาก "อายุตอนรอบดึง"
             #    ถ้าส่งค่ามากกว่า 0 keepalive จะเห็นว่า session ยังใหม่แล้วข้ามทั้งหมด
             #    ทางซ่อมจะดูเหมือนทำงานแต่ไม่ได้ต่ออายุอะไรเลย (เจอตอนทดสอบ 2026-08-09)
+            # --guard-min 0 : ปลดตัวกันชนกับรอบดึง
+            #   ตัวกันนั้นมีไว้กัน keepalive "ที่ตั้งเวลาไว้" ไปคว้าล็อกตอนใกล้ 08:30
+            #   แต่ตรงนี้ preflight เรียกเองแบบรอจนเสร็จ และตัว preflight เองก็เป็น
+            #   ขั้นแรกของรอบดึง จึงไม่มีทางแย่งล็อกกับรอบดึง
+            #   ถ้าไม่ปลด preflight ที่รันตอน 08:30 จะสั่งซ่อมไม่ได้เลย
             [sys.executable, "-u", str(PROJECT_ROOT / "scripts" / "keepalive.py"),
-             "--platform", "tiktok", "--max-age", "0"],
+             "--platform", "tiktok", "--max-age", "0", "--guard-min", "0"],
             cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=900,
             encoding="utf-8", errors="replace", env=env,
         )
