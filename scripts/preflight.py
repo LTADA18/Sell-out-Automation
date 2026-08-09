@@ -1,12 +1,15 @@
 r"""ตรวจความพร้อมก่อนรอบดึงรายวัน — ตอบว่า "พรุ่งนี้ 08:30 จะดึงได้ไหม"
 
 ไล่ตรวจทุกอย่างที่เคยทำให้รอบรายวันพัง ไม่ใช่แค่ที่นึกออก
-เจอปัญหาแล้วบอกวิธีแก้ตรง ๆ ไม่ใช่แค่บอกว่าพัง
+**เจอว่า session จะหมดอายุก่อนรอบดึง จะรัน keepalive ซ่อมให้เองทันที**
+ไม่ใช่แค่บอกว่าเสี่ยงแล้วปล่อยให้ไปพังตอนเช้า
 
     .\.venv\Scripts\python.exe -u scripts\preflight.py
+    .\.venv\Scripts\python.exe -u scripts\preflight.py --no-fix   # ตรวจอย่างเดียว
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sqlite3
@@ -20,6 +23,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.config import load_config                   # noqa: E402
 from src.core.naming import canonical_name                # noqa: E402
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--no-fix", action="store_true",
+                 help="ตรวจอย่างเดียว ไม่ต่ออายุ session ให้")
+_ap.add_argument("--deadline", type=float, default=23.0,
+                 help="เส้นตายอายุ session (ชม.) — ลดลงเพื่อทดสอบทางซ่อม")
+ARGS = _ap.parse_args()
 
 problems: list[str] = []
 warnings: list[str] = []
@@ -99,8 +109,8 @@ print(f"     โปรไฟล์เบราว์เซอร์ {n_prof} ช
 #    ถ้าเชื่อตามนั้นแล้วไปนอน เช้ามาก็พังเหมือนวันที่ 8
 #
 # เส้นตายจากการวัดจริง: 23.8 ชม. ตาย / 21.0 ชม. รอด
-DEADLINE_H = 23.0
-WARN_H = 20.0
+DEADLINE_H = ARGS.deadline
+WARN_H = min(20.0, DEADLINE_H - 1)
 
 head("3.1 อายุ session ตอนรอบดึงถัดไป")
 _now = datetime.now()
@@ -109,23 +119,73 @@ if _run <= _now:
     _run += timedelta(days=1)
 print(f"  รอบดึงถัดไป {_run:%d/%m %H:%M}")
 
-risky: list[str] = []
-for s in shops:
-    if s.platform != "tiktok":
-        continue                                          # Lazada/Shopee ต่ออายุเองได้ดีอยู่แล้ว
-    f = sess_dir / f"{s.profile_id}_state.json"
-    if not f.exists():
-        continue
-    age_at_run = (_run - datetime.fromtimestamp(f.stat().st_mtime)).total_seconds() / 3600
+def _ages_at_run() -> dict[str, float]:
+    """อายุ session ของแต่ละร้าน TikTok ณ เวลารอบดึงถัดไป"""
+    out: dict[str, float] = {}
+    for sh in shops:
+        if sh.platform != "tiktok":
+            continue                                      # Lazada/Shopee ต่ออายุเองได้ดีอยู่แล้ว
+        p = sess_dir / f"{sh.profile_id}_state.json"
+        if p.exists():
+            out[sh.shop_id] = (
+                _run - datetime.fromtimestamp(p.stat().st_mtime)).total_seconds() / 3600
+    return out
+
+
+ages = _ages_at_run()
+risky = [sid for sid, a in ages.items() if a >= DEADLINE_H]
+fixed: set[str] = set()
+
+# ── ซ่อมเองถ้าเสี่ยง ──────────────────────────────────────────
+# เจ้าของงานสั่งไว้: อย่ารอให้ปัญหาเกิด ให้ชิงแก้ก่อน
+# ตรวจแล้วรู้ว่าจะพังแต่ปล่อยไว้ = ไร้ประโยชน์ เพราะเช้ามาก็พังอยู่ดี
+if risky and not ARGS.no_fix:
+    print(f"  ⚠️  {len(risky)} ร้านจะหมดอายุก่อนรอบดึง — ต่ออายุให้เลย")
+    for sid in risky:
+        print(f"       {sid} จะอายุ {ages[sid]:.1f} ชม.")
+    try:
+        # ⚠️ ต้องบังคับ UTF-8 ให้ทั้งฝั่งลูกและฝั่งอ่าน
+        #    ไม่งั้น Python อ่าน stdout ภาษาไทยด้วย cp1252 แล้วโยน UnicodeDecodeError
+        #    ในเธรดอ่านผลลัพธ์ ทำให้ทางซ่อมล้มทั้งที่ keepalive ทำงานได้ปกติ
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        res = subprocess.run(
+            # ⚠️ ต้องเป็น --max-age 0 (บังคับต่ออายุทุกร้าน)
+            #    keepalive วัด "อายุตอนนี้" แต่ preflight ตัดสินจาก "อายุตอนรอบดึง"
+            #    ถ้าส่งค่ามากกว่า 0 keepalive จะเห็นว่า session ยังใหม่แล้วข้ามทั้งหมด
+            #    ทางซ่อมจะดูเหมือนทำงานแต่ไม่ได้ต่ออายุอะไรเลย (เจอตอนทดสอบ 2026-08-09)
+            [sys.executable, "-u", str(PROJECT_ROOT / "scripts" / "keepalive.py"),
+             "--platform", "tiktok", "--max-age", "0"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=900,
+            encoding="utf-8", errors="replace", env=env,
+        )
+        for line in (res.stdout or "").splitlines():
+            if any(k in line for k in ("✅", "❌", "ต่ออายุ", "ข้าม")):
+                print(f"       {line.strip()}")
+    except Exception as exc:                             # noqa: BLE001
+        warn(f"รัน keepalive อัตโนมัติไม่สำเร็จ: {str(exc)[:80]}")
+
+    before = dict(ages)
+    ages = _ages_at_run()                                # วัดใหม่หลังซ่อม
+    fixed = {sid for sid in before if ages.get(sid, 99) < before[sid] - 0.05}
+    risky = [sid for sid, a in ages.items() if a >= DEADLINE_H]
+    if not risky:
+        print("  ✅ ต่ออายุแล้ว — ไม่เสี่ยงอีกต่อไป")
+
+for sid, age_at_run in sorted(ages.items()):
     if age_at_run >= DEADLINE_H:
-        bad(f"{s.shop_id} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — เกินเส้นตาย "
-            f"(รัน .\\keepalive.ps1 ก่อนนอน)")
-        risky.append(s.shop_id)
+        # แยก 2 กรณีให้ชัด ไม่งั้นข้อความจะชี้ไปผิดทาง
+        #   ต่ออายุไม่ติด = session ตายจริง ต้องมีคนล็อกอิน
+        #   ต่ออายุติดแล้วแต่ยังเกิน = เส้นตายตั้งไว้สั้นกว่าระยะห่างถึงรอบดึง
+        if sid in fixed:
+            bad(f"{sid} ต่ออายุแล้วแต่ยังจะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง "
+                f"— รอบดึงอยู่ไกลเกินเส้นตาย {DEADLINE_H:.0f} ชม.")
+        else:
+            bad(f"{sid} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — เกินเส้นตาย "
+                f"และต่ออายุเองไม่สำเร็จ ต้องล็อกอินร้านนี้")
     elif age_at_run >= WARN_H:
-        warn(f"{s.shop_id} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — จ่อเส้น "
-             f"ต้องหวังพึ่ง keepalive 20:00")
+        warn(f"{sid} จะอายุ {age_at_run:.1f} ชม. ตอนรอบดึง — จ่อเส้น")
     else:
-        print(f"     ✅ {s.shop_id:<11} จะอายุ {age_at_run:.1f} ชม.")
+        print(f"     ✅ {sid:<11} จะอายุ {age_at_run:.1f} ชม.")
 
 # keepalive ทำงานล่าสุดเมื่อไหร่ — ถ้าไม่ได้รันมาเกินวันครึ่งแปลว่ามันไม่ทำงาน
 ka_log = PROJECT_ROOT / "logs" / "run_keepalive.jsonl"   # ชื่อจริงที่ setup_logging เขียน
