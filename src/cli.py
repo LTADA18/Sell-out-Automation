@@ -20,6 +20,25 @@ from src.core.status_store import StatusStore
 
 DATE_FMT = "%Y-%m-%d"
 
+# ⚠️ บังคับ stdout/stderr เป็น UTF-8 ตั้งแต่ต้น
+#
+#    บน Windows ถ้า stdout ถูก redirect ลงไฟล์หรือ pipe Python จะใช้ codepage
+#    ของระบบ (cp1252/cp874) ซึ่งเขียนภาษาไทยไม่ได้ พอ click.echo พิมพ์บรรทัดสรุป
+#    ที่มีภาษาไทยก็จะโยน UnicodeEncodeError แล้วโปรเซสตายทันที
+#
+#    เจอจริง 2026-08-10: `backfill --from 2026-08-01 --to 2026-08-09` ดึงวันแรก
+#    สำเร็จครบ 5 ร้าน (run_finished success 5/5) แล้วตายตอนพิมพ์สรุป
+#    วันที่ 2-9 จึงไม่เคยถูกดึงเลย และไม่มี error โผล่ในล็อกด้วย
+#    ผมไปโทษว่าเน็ตหลุดอยู่พักหนึ่งก่อนจะเจอว่าเป็นเรื่องนี้
+#
+#    แก้ที่นี่ที่เดียวแทนการไปตั้ง PYTHONIOENCODING ทุกครั้งที่เรียก
+#    เพราะคนเรียกลืมได้ แต่โค้ดลืมไม่ได้
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):                 # ไม่ใช่ TextIO ก็ปล่อยผ่าน
+        pass
+
 
 def _parse(value: str | None, field: str) -> date | None:
     if value is None:
