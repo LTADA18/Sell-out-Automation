@@ -30,13 +30,25 @@ def _run(code: str, encoding: str) -> subprocess.CompletedProcess:
 
 
 def test_cli_survives_thai_on_legacy_codepage() -> None:
-    """import src.cli แล้วพิมพ์ภาษาไทยได้ แม้ codepage เขียนไทยไม่ได้
-
-    ถ้าไม่มีตัว reconfigure ใน cli.py เคสนี้จะ exit ไม่เป็น 0
-    """
+    """import src.cli แล้วพิมพ์ภาษาไทยได้ แม้ codepage เขียนไทยไม่ได้"""
     res = _run("import src.cli; print('สรุป: ครบทุกร้าน ✅')", "cp1252")
     assert res.returncode == 0, (
         f"พิมพ์ภาษาไทยแล้วตาย — stderr: {res.stderr.decode('utf-8', 'replace')[:300]}"
+    )
+
+
+def test_any_script_importing_src_core_survives() -> None:
+    """สคริปต์ใน scripts/ ก็ต้องรอด ไม่ใช่แค่ cli
+
+    เจอจริง 2026-08-10: แก้ไว้ที่ cli.py ที่เดียว แล้ว screen_orders.py กับ
+    merge_range.py ยังตายอยู่ ทั้งที่ดึงข้อมูลครบ 90 รอบไปแล้ว
+    ตัวป้องกันจึงต้องอยู่ที่ src/core/__init__.py ซึ่งทุกสคริปต์ import ผ่าน
+    """
+    res = _run("from src.core.config import load_config; print('สกรีนแล้ว 16/16 ไฟล์ ✅')",
+               "cp1252")
+    assert res.returncode == 0, (
+        f"สคริปต์ที่ import src.core ยังตาย — stderr: "
+        f"{res.stderr.decode('utf-8', 'replace')[:300]}"
     )
 
 
