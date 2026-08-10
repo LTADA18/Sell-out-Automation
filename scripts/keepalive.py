@@ -64,7 +64,9 @@ def touch(shop, settings) -> tuple[bool, str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--platform", help="เฉพาะแพลตฟอร์มเดียว เช่น tiktok")
+    ap.add_argument("--platform",
+                    help="จำกัดแพลตฟอร์ม คั่นหลายตัวด้วย , เช่น shopee,tiktok "
+                         "(ไม่ใส่ = ทุกแพลตฟอร์ม)")
     ap.add_argument("--shop", help="เฉพาะร้านเดียว")
     ap.add_argument("--max-age", type=float, default=8.0,
                     help="แตะเฉพาะร้านที่ session เก่ากว่ากี่ชั่วโมง (ค่าเริ่มต้น 8)")
@@ -96,7 +98,8 @@ def main() -> int:
 
     shops = [s for s in cfg.shops if s.enabled and s.adapter == "playwright"]
     if args.platform:
-        shops = [s for s in shops if s.platform == args.platform]
+        want = {p.strip() for p in args.platform.split(",") if p.strip()}
+        shops = [s for s in shops if s.platform in want]
     if args.shop:
         shops = [s for s in shops if s.shop_id == args.shop]
 

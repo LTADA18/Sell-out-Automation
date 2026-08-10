@@ -44,6 +44,12 @@ def read_rows(db_path: Path, run_date: str | None = None) -> tuple[str, list[dic
             "ORDER BY platform, shop_id", (run_date, run_date)).fetchall()]
     finally:
         conn.close()
+
+    # ร้านที่ปิดไว้เองไม่ต้องขึ้นในอีเมล — เจ้าของงานสั่ง 2026-08-10
+    # เหตุผล: ร้านที่รู้อยู่แล้วว่ายังดึงไม่ได้ (เช่น Lazada ที่รอสิทธิ์) ขึ้นทุกวัน
+    # กลายเป็นสัญญาณรบกวน ผู้รับ 5 คนต้องมองข้ามมันทุกเช้า
+    # ⚠️ ยังเห็นได้บน Dashboard เหมือนเดิม จึงไม่ใช่การซ่อนปัญหา แค่ไม่รบกวนในอีเมล
+    rows = [r for r in rows if r["status"] != RunStatus.SKIPPED.value]
     return run_date, rows
 
 

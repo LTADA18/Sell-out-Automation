@@ -59,10 +59,12 @@ shops = [s for s in cfg.shops if s.enabled]
 # ── 1. ร้านที่ต้องดึง ────────────────────────────────────────
 head("1. รายชื่อร้าน")
 print(f"  เปิดใช้งาน {len(shops)} ร้าน · ปิดไว้ {len(cfg.shops) - len(shops)} ร้าน")
-if len(shops) != 13:
-    warn(f"จำนวนร้านเปลี่ยนเป็น {len(shops)} (เดิม 13) — เช็คว่าตั้งใจไหม")
+EXPECTED_SHOPS = 16                                       # 18 ร้าน ปิดไว้ 2 (lazada_02/03 ติดสิทธิ์)
+if len(shops) != EXPECTED_SHOPS:
+    warn(f"จำนวนร้านเปลี่ยนเป็น {len(shops)} (คาดไว้ {EXPECTED_SHOPS}) — เช็คว่าตั้งใจไหม "
+         f"ถ้าตั้งใจให้แก้ EXPECTED_SHOPS ในไฟล์นี้")
 else:
-    ok("ครบ 13 ร้านตามที่ตกลง")
+    ok(f"ครบ {EXPECTED_SHOPS} ร้านตามที่ตกลง")
 
 # ── 2. ชื่อร้านมาตรฐาน ───────────────────────────────────────
 head("2. ชื่อร้านมาตรฐาน (ของใหม่วันนี้)")
@@ -123,8 +125,12 @@ def _ages_at_run() -> dict[str, float]:
     """อายุ session ของแต่ละร้าน TikTok ณ เวลารอบดึงถัดไป"""
     out: dict[str, float] = {}
     for sh in shops:
+        # เช็คเฉพาะ TikTok เพราะเป็นเจ้าเดียวที่ "อายุ session" ทำนายผลได้จริง
+        #   TikTok  ~24 ชม. — วัดได้ชัด (23.8 ตาย / 21.0 รอด) จึงเตือนล่วงหน้าได้
+        #   Lazada  ~85 นาที — สั้นจนอายุไม่มีความหมาย พึ่ง auto_relogin ตอนดึงแทน
+        #   Shopee  ต่ออายุเองได้ด้วยหน้าเลือกบัญชี ไม่ต้องใช้รหัสผ่าน
         if sh.platform != "tiktok":
-            continue                                      # Lazada/Shopee ต่ออายุเองได้ดีอยู่แล้ว
+            continue
         p = sess_dir / f"{sh.profile_id}_state.json"
         if p.exists():
             out[sh.shop_id] = (

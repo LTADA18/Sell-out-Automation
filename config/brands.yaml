@@ -42,9 +42,20 @@ brands:
     shops: [shopee_01]
 
   - name: "Smarttooltech"
-    shops: [shopee_02]
+    shops: [shopee_02, lazada_03]     # เพิ่มหน้าร้าน Lazada 2026-08-09
 
-  # 2 ร้านนี้อยู่บน Shopee ทั้งคู่ ใช้บัญชี tnltools เดียวกัน
+  # shopee_03/08 อยู่บน Shopee ทั้งคู่ ใช้บัญชี tnltools เดียวกัน
   # ชื่อจริงคือ Toolspartner กับ TNLTOOLSTORE — เจ้าของงานให้ใช้ TNLTOOLSTORE
+  # lazada_02 คือหน้าร้าน Lazada ของแบรนด์เดียวกัน เพิ่ม 2026-08-09
   - name: "TNLTOOLSTORE"
-    shops: [shopee_03, shopee_08]
+    shops: [shopee_03, shopee_08, lazada_02]
+
+  # ── ร้านใหม่ 2026-08-09 ──────────────────────────────────
+  # เจ้าของงานยืนยัน 2026-08-10 ว่า 2 หน้าร้านนี้เป็นร้านเดียวกัน
+  # ชื่อจริงบนเว็บคือ Superhomefactory กับ DIY tools ขายเครื่องมือช่าง
+  # ให้ใช้ชื่อรวมว่า "นาดา" — อีเมลจะขึ้น "นาดา (Superhomefactory)" เป็นต้น
+  - name: "นาดา"
+    shops: [shopee_09, shopee_10]
+
+  - name: "Jumbo A"
+    shops: [shopee_11]

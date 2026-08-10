@@ -23,6 +23,34 @@ shops:
     account_key: LAZADA_01
     enabled: true
 
+  # เพิ่ม 2026-08-09 — 2 ร้านนี้เป็นหน้าร้าน Lazada ของแบรนด์ที่มีบน Shopee อยู่แล้ว
+  # ชื่อมาตรฐานจึงต้องตรงกับของเดิม (ดู config/brands.yaml)
+  #
+  # ⚠️ ปิดไว้ 2026-08-10 — ติดสิทธิ์ ไม่ใช่บั๊กและไม่ใช่ session
+  #    ล็อกอินผ่าน (Chrome จำรหัสไว้แล้ว ต่ออายุเองได้) แต่บัญชีไม่มีสิทธิ์ดูคำสั่งซื้อ
+  #    ระบบคืน NO_PERMISSION ซึ่งเป็น error ที่ห้าม retry — ยิงซ้ำก็ไม่ผ่าน
+  #
+  #    ทำไมต้องปิดแทนที่จะปล่อยให้แดง: กฎ "ไม่ครบทุกร้านห้ามส่งเมล" นับเฉพาะ FAILED
+  #    ถ้าปล่อยไว้ อีเมลจะไม่ออกเลยทุกวันจนกว่าจะแก้สิทธิ์เสร็จ
+  #    ปิดแล้วขึ้น SKIPPED สีเทา อีเมลออกปกติ แต่ยังเห็นบน Dashboard ว่าค้างอยู่
+  #
+  #    เปิดกลับเมื่อ: เจ้าของร้านเพิ่มสิทธิ์ "จัดการคำสั่งซื้อ" ให้บัญชีที่เราใช้
+  - shop_id: lazada_02
+    platform: lazada
+    adapter: playwright
+    display_name: "TNLTOOLSTORE"
+    account_key: LAZADA_02
+    enabled: false
+    skip_reason: "รอเจ้าของร้านเพิ่มสิทธิ์ดูคำสั่งซื้อ (NO_PERMISSION 2026-08-10)"
+
+  - shop_id: lazada_03
+    platform: lazada
+    adapter: playwright
+    display_name: "Smarttooltech"
+    account_key: LAZADA_03
+    enabled: false
+    skip_reason: "รอเจ้าของร้านเพิ่มสิทธิ์ดูคำสั่งซื้อ (NO_PERMISSION 2026-08-10)"
+
   # ── TikTok Shop ───────────────────────────────────────────
   - shop_id: tiktok_01
     platform: tiktok
@@ -125,14 +153,50 @@ shops:
     account_key: SHOPEE_06
     enabled: true
 
+  # ── ร้านใหม่ เพิ่ม 2026-08-09 ──────────────────────────────
+  #
+  # ⚠️ shopee_09 / shopee_10 เป็น "รหัสที่ถูกนำมาใช้ซ้ำ" ตามที่เจ้าของงานกำหนด
+  #    รหัสเดียวกันนี้เคยเป็นของ Yong House / บ้านช่าง ซึ่งเป็นคนละร้านกันสิ้นเชิง
+  #    และเป็นร้านที่ไม่ยินยอมให้ดึงข้อมูล (ดูหมายเหตุท้ายไฟล์)
+  #    ร้านเก่าไม่เคยดึงสำเร็จเลยสักรอบ จึงไม่มีข้อมูลปนกัน
+  #
+  # ยังไม่รู้ว่า 3 ร้านนี้อยู่บัญชีเดียวกันหรือแยกกัน จึงให้แต่ละร้านมีโปรไฟล์ของตัวเองไปก่อน
+  # ถ้าล็อกอินแล้วพบว่าอยู่บัญชีเดียวกัน ค่อยรวม profile_key ทีหลังจะได้ล็อกอินครั้งเดียว
+  # 2 ร้านนี้เป็นร้านเดียวกัน (แบรนด์ "นาดา") เหมือนกรณี Toolspartner + TNLTOOLSTORE
+  # display_name = ชื่อจริงบนเว็บ ห้ามใส่ "นาดา" ต่อท้าย เพราะค่านี้ถูกใช้จับคู่แถวร้าน
+  # ในหน้า /portal/shop ด้วย ถ้าไม่ตรงเป๊ะจะกดผิดร้านหรือหาไม่เจอ
+  - shop_id: shopee_09
+    platform: shopee
+    adapter: playwright
+    display_name: "Superhomefactory"
+    account_key: SHOPEE_09
+    enabled: true
+
+  - shop_id: shopee_10
+    platform: shopee
+    adapter: playwright
+    display_name: "DIY tools ขายเครื่องมือช่าง"
+    account_key: SHOPEE_10
+    enabled: true
+
+  - shop_id: shopee_11
+    platform: shopee
+    adapter: playwright
+    display_name: "Jumbo A"
+    account_key: SHOPEE_11
+    enabled: true
+
   # ── เอาออกแล้ว 2026-08-05 — เจ้าของร้านไม่ยินยอมให้ดึงข้อมูล ──────────
   #
   # shopee_07  Yonghouse Official Store
-  # shopee_09  Yong House ยงเฮ้าส์
-  # shopee_10  บ้านช่าง Baanchang
+  # shopee_09  Yong House ยงเฮ้าส์        ← รหัสถูกนำไปใช้กับ "นาดา 1" แล้ว
+  # shopee_10  บ้านช่าง Baanchang         ← รหัสถูกนำไปใช้กับ "นาดา 2" แล้ว
   #
   # ทั้ง 3 ร้านอยู่ใต้บัญชี YM_SP:Osuka (ใช้ profile_key เดียวกัน)
   # เจ้าของงานคุยกับทางร้านแล้ว ทางร้านไม่ต้องการให้เราดึงข้อมูล
+  #
+  # ⚠️ ห้ามเพิ่ม 3 ร้านนี้กลับเข้ามาเด็ดขาด — ที่รหัส 09/10 มีอยู่ตอนนี้คือ "นาดา"
+  #    ซึ่งเป็นคนละร้าน ไม่ใช่การเอาร้านเดิมกลับมา
   #
   # ⚠️ ต่างจากร้านที่ตั้ง enabled: false ตรงที่อันนั้นคือ "ติดปัญหาเทคนิค รอแก้"
   #    แต่ 3 ร้านนี้คือ "ไม่ได้รับความยินยอม" — ห้ามเปิดกลับเองเด็ดขาด

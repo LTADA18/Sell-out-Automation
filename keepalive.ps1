@@ -7,7 +7,13 @@
 # ⚠️ ไฟล์นี้ต้องเซฟเป็น UTF-8 with BOM (กฎเหล็กข้อ 6)
 
 param(
-    [string]$Platform = "tiktok",
+    # ครอบ Shopee ด้วย ไม่ใช่แค่ TikTok — ร้าน Shopee ก็ session หมดอายุได้
+    # (เพิ่ม shopee เมื่อ 2026-08-09 ตอนเพิ่มร้านใหม่ 3 ร้าน)
+    #
+    # ⚠️ ไม่รวม Lazada โดยตั้งใจ — session ของ Lazada อยู่ได้แค่ ~85 นาที
+    #    ต่ออายุตอน 13:00 ก็ตายก่อนถึง 08:30 อยู่ดี ไม่มีประโยชน์
+    #    Lazada พึ่ง auto_relogin ตอนดึงจริงแทน ซึ่งทำงานได้มาตลอด
+    [string]$Platform = "shopee,tiktok",
     [double]$MaxAge = 8.0
 )
 
