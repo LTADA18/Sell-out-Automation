@@ -8,10 +8,11 @@ r"""สร้าง Data Dictionary เป็นไฟล์ Excel ให้ฝ�
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -23,6 +24,54 @@ from src.core.models import EXCEL_COLUMNS, OrderStatus     # noqa: E402
 
 OUT = PROJECT_ROOT / "docs" / "Data_Dictionary_คำสั่งซื้อ.xlsx"
 FILL_RATE = PROJECT_ROOT / "docs" / "column_fill_rate.json"
+
+# ── Data Dictionary ของระบบสกรีน (คนละโปรเจกต์) ──────────────
+#
+# ⚠️ อ่านจากไฟล์ของเขาตอน build ไม่คัดลอกคำอธิบายมาเก็บซ้ำในโค้ดนี้
+#    ถ้าคัดลอกมา วันหนึ่งเขาแก้ของเขาแล้วของเราจะค้างอยู่กับข้อมูลเก่า
+#    กลายเป็น 2 แหล่งความจริงที่ขัดกันเอง ซึ่งเป็นสิ่งที่โปรเจกต์นี้เลี่ยงมาตลอด
+#    เขาแก้เมื่อไหร่ รันไฟล์นี้ใหม่แล้วตรงกันทันที
+SCREEN_DD = Path(os.environ.get(
+    "OSUKA_SKU_DIR", r"C:\Users\tada.p\Clean data\osuka-sku")
+) / "docs" / "osuka_sku_matching_data_dictionary_Screening System.xlsx"
+
+
+def read_screen_dd(sheet: str) -> list[list[str]]:
+    """อ่านตาราง Field/Type/Description/Example จาก DD ของระบบสกรีน
+
+    คืน [] ถ้าอ่านไม่ได้ — เอกสารฝั่งเราต้องสร้างได้เสมอ
+    ไม่ใช่พังทั้งไฟล์เพราะอีกโปรเจกต์ไม่อยู่ที่เดิม
+    """
+    # ⚠️ ห้ามกลืน error เงียบ ๆ — ถ้าอ่านไม่ได้ต้องบอกว่าเพราะอะไร
+    #    ของเดิมคืน [] เฉย ๆ ทำให้เอกสารออกมาโดยไม่มีชั้นที่ 2 แล้วดูเหมือนสำเร็จ
+    if not SCREEN_DD.exists():
+        print(f"  ⚠️ ไม่พบไฟล์ DD ของระบบสกรีน: {SCREEN_DD}")
+        return []
+    try:
+        wb = load_workbook(SCREEN_DD, read_only=True, data_only=True)
+    except Exception as exc:                             # noqa: BLE001
+        print(f"  ⚠️ เปิดไฟล์ DD ของระบบสกรีนไม่ได้: {type(exc).__name__}: {exc}")
+        return []
+    try:
+        if sheet not in wb.sheetnames:
+            print(f"  ⚠️ ไม่มีชีท {sheet!r} — ที่มีคือ {wb.sheetnames}")
+            return []
+        rows = [[str(c).strip() if c is not None else "" for c in r]
+                for r in wb[sheet].iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+    out: list[list[str]] = []
+    started = False
+    for r in rows:
+        if not started:
+            if r and r[0] == "Field":                    # หัวตารางจริงเริ่มตรงนี้
+                started = True
+            continue
+        if not r or not r[0]:
+            continue
+        out.append((r + ["", "", "", ""])[:4])
+    return out
 
 FONT = "Arial"
 NAVY = "1F3864"
@@ -264,6 +313,95 @@ for i, col in enumerate(EXCEL_COLUMNS, start=1):
 for col, w in zip("ABCDEFGHIJK", (5, 22, 16, 9, 14, 42, 10, 10, 10, 18, 60)):
     ws.column_dimensions[col].width = w
 
+# ══════════ ชีท 2.5: ชั้นที่ 2 — หลังสกรีน SKU (63 คอลัมน์) ══════════
+ws = wb.create_sheet("หลังสกรีน 63 คอลัมน์")
+screen_rows = read_screen_dd("sku_match_data")
+r = title(
+    ws, "ชั้นที่ 2 — ไฟล์หลังสกรีน SKU (63 คอลัมน์) = ของที่ส่งมอบจริง",
+    f"คำอธิบายอ่านสดจาก DD ของระบบ osuka-sku ตอนสร้างไฟล์นี้ ไม่ได้คัดลอกมาเก็บซ้ำ · "
+    f"{'อ่านได้ ' + str(len(screen_rows)) + ' คอลัมน์' if screen_rows else 'อ่านไม่ได้ — ดูหมายเหตุ'}")
+
+if not screen_rows:
+    ws.cell(row=r, column=1,
+            value=f"อ่าน DD ของระบบสกรีนไม่ได้ที่ {SCREEN_DD}").font = Font(
+        name=FONT, size=10, color="C00000")
+    ws.cell(row=r + 1, column=1,
+            value="ตั้งตัวแปร OSUKA_SKU_DIR ให้ชี้ไปที่โปรเจกต์ osuka-sku แล้วสร้างใหม่").font = Font(
+        name=FONT, size=10)
+    ws.column_dimensions["A"].width = 100
+else:
+    ws.cell(row=r, column=1,
+            value="63 คอลัมน์ = 32 ของชั้นที่ 1 (ยกมาทั้งดุ้น ไม่ถูกแก้) + 31 ที่ระบบสกรีนเติมให้"
+            ).font = Font(name=FONT, size=10, bold=True)
+    r += 2
+    for i, h in enumerate(["#", "คอลัมน์", "ชนิด", "มาจากชั้นไหน", "คำอธิบาย", "ตัวอย่าง"], start=1):
+        ws.cell(row=r, column=i, value=h)
+    style_header(ws, r, 6)
+    ws.freeze_panes = f"C{r + 1}"
+    r += 1
+
+    layer1 = set(EXCEL_COLUMNS)
+    n_new = 0
+    for i, (fld, typ, desc, ex) in enumerate(screen_rows, start=1):
+        name = fld.lstrip("★ ").strip()
+        from_l1 = name in layer1
+        if not from_l1:
+            n_new += 1
+        ws.cell(row=r, column=1, value=i)
+        c = ws.cell(row=r, column=2, value=fld)
+        c.font = Font(name=FONT, bold=True, size=10,
+                      color="000000" if from_l1 else "1F6F1F")
+        ws.cell(row=r, column=3, value=typ)
+        ws.cell(row=r, column=4, value="ชั้น 1 (ดึง)" if from_l1 else "ชั้น 2 (สกรีน)")
+        ws.cell(row=r, column=5, value=desc)
+        ws.cell(row=r, column=6, value=ex)
+        for j in range(1, 7):
+            cell = ws.cell(row=r, column=j)
+            cell.border = BOX
+            cell.alignment = Alignment(wrap_text=(j in (5, 6)), vertical="center")
+            if not cell.font.bold:
+                cell.font = Font(name=FONT, size=10)
+            if not from_l1:
+                cell.fill = PatternFill("solid", fgColor=OKBG)
+        r += 1
+
+    r += 1
+    ws.cell(row=r, column=1,
+            value=f"แถวสีเขียว = {n_new} คอลัมน์ที่ระบบสกรีนเติมให้ · "
+                  f"แถวขาว = {len(screen_rows) - n_new} คอลัมน์ที่ยกมาจากชั้นที่ 1").font = Font(
+        name=FONT, size=9, italic=True, color="1F6F1F")
+    for col, w in zip("ABCDEF", (5, 26, 12, 15, 62, 30)):
+        ws.column_dimensions[col].width = w
+
+# ══════════ ชีท 2.6: ค่าที่เป็นไปได้ของชั้นที่ 2 ══════════
+VOCABS = [
+    ("vocab_match_method", "match_method", "ชั้นการจับคู่ L0–L8"),
+    ("vocab_mapping_status", "mapping_status_detail", "สถานะการจับคู่แบบละเอียด"),
+    ("vocab_review_reason", "review_reason", "รหัสเหตุผลที่ต้องให้คนตรวจ"),
+]
+ws = wb.create_sheet("ค่าที่เป็นไปได้ ชั้น 2")
+r = title(ws, "ค่าที่เป็นไปได้ของคอลัมน์ที่ระบบสกรีนเติม",
+          "อ่านสดจาก DD ของ osuka-sku เช่นกัน")
+for i, h in enumerate(["คอลัมน์", "ค่า", "ความหมาย"], start=1):
+    ws.cell(row=r, column=i, value=h)
+style_header(ws, r, 3)
+r += 1
+for sheet_name, col_name, _note in VOCABS:
+    vals = read_screen_dd(sheet_name)
+    for fld, _typ, desc, _ex in vals:
+        ws.cell(row=r, column=1, value=col_name)
+        ws.cell(row=r, column=2, value=fld).font = Font(name=FONT, bold=True, size=10)
+        ws.cell(row=r, column=3, value=desc)
+        for j in range(1, 4):
+            cell = ws.cell(row=r, column=j)
+            cell.border = BOX
+            cell.alignment = Alignment(wrap_text=(j == 3), vertical="center")
+            if not cell.font.bold:
+                cell.font = Font(name=FONT, size=10)
+        r += 1
+for col, w in zip("ABC", (24, 34, 74)):
+    ws.column_dimensions[col].width = w
+
 # ══════════ ชีท 3: ข้อควรระวัง ══════════
 ws = wb.create_sheet("ข้อควรระวัง")
 r = title(ws, "ข้อควรระวัง — อ่านก่อนออกแบบตารางและก่อนเขียนรายงาน",
@@ -329,6 +467,112 @@ for i, (topic, detail, action) in enumerate(RISKS, start=1):
 for col, w in zip("ABCD", (5, 30, 62, 62)):
     ws.column_dimensions[col].width = w
 ws.freeze_panes = f"A{hr + 1}"
+
+# ══════════ ชีท 3.5: 2 ระบบต่อกันยังไง ══════════
+ws = wb.create_sheet("2 ระบบต่อกันยังไง")
+r = title(ws, "สองระบบต่อกันยังไง — และอะไรคือจุดที่กระทบกันได้",
+          "ระบบดึงยอด (Dealer MKP Platform) + ระบบสกรีน SKU (osuka-sku) · เชื่อมอัตโนมัติ 2026-08-10")
+
+FLOW = [
+    ("ชั้น 1", "Dealer MKP Platform", "ดึงคำสั่งซื้อจากหลังบ้าน 15 ร้าน",
+     "Excel 32 คอลัมน์ · schema กลาง", "output/<วันที่>/"),
+    ("ชั้น 2", "osuka-sku", "เติม osuka_sml_id / osuka_model_code + 29 คอลัมน์ประกอบ",
+     "Excel 63 คอลัมน์ ← ของส่งมอบ", "output/<วันที่>/screened/"),
+    ("ชั้น 3", "OSUKA Super Intelligence", "ฐานข้อมูลปลายทาง schema intel",
+     "mp_orders_raw · mp_sku_mapping", "รอรายละเอียดการเชื่อมต่อ"),
+]
+for i, h in enumerate(["ชั้น", "ระบบ", "ทำอะไร", "ผลลัพธ์", "เก็บที่"], start=1):
+    ws.cell(row=r, column=i, value=h)
+style_header(ws, r, 5)
+r += 1
+for row_vals in FLOW:
+    for j, v in enumerate(row_vals, start=1):
+        c = ws.cell(row=r, column=j, value=v)
+        c.border = BOX
+        c.alignment = Alignment(wrap_text=True, vertical="center")
+        c.font = Font(name=FONT, size=10, bold=(j <= 2))
+    ws.row_dimensions[r].height = 34
+    r += 1
+
+r += 1
+ws.cell(row=r, column=1, value="สิ่งที่ทำให้ 2 ระบบไม่ชนกัน").font = Font(
+    name=FONT, bold=True, size=12, color=NAVY)
+r += 1
+for i, h in enumerate(["หลักการ", "ทำอย่างไร", "ถ้าไม่ทำจะเกิดอะไร"], start=1):
+    ws.cell(row=r, column=i, value=h)
+style_header(ws, r, 3)
+r += 1
+
+RULES = [
+    ("แยกโฟลเดอร์ แยก repo",
+     "ระบบดึงก๊อปไฟล์เข้า input/ ของระบบสกรีน แล้วเรียกสคริปต์ของเขา "
+     "ไม่แก้โค้ดเขาแม้แต่บรรทัดเดียว ผลลัพธ์ก๊อปกลับมาเก็บฝั่งเรา",
+     "ถ้ารวมโฟลเดอร์ตอนนี้ ต้องสร้าง .venv ใหม่ ติดตั้งงานตั้งเวลาใหม่ "
+     "และเสี่ยงต้องล็อกอินใหม่ทั้ง 15 ร้าน"),
+    ("ที่อยู่ปรับได้ ไม่ฝังตาย",
+     "ระบบดึงหาระบบสกรีนจากตัวแปร OSUKA_SKU_DIR (มีค่าเริ่มต้นให้) "
+     "ย้ายโฟลเดอร์เมื่อไหร่แค่เปลี่ยนค่านี้",
+     "ฝัง path ตายตัวแล้วย้ายโฟลเดอร์ = พังเงียบ ๆ ตอนตี 8 ครึ่ง"),
+    ("เอกสารอ่านจากต้นทาง ไม่คัดลอก",
+     "ชีท 'หลังสกรีน 63 คอลัมน์' อ่านคำอธิบายสดจาก DD ของ osuka-sku ตอนสร้างไฟล์นี้",
+     "คัดลอกมาเก็บซ้ำ = วันหนึ่งเขาแก้ของเขา ของเราค้างอยู่กับข้อมูลเก่า "
+     "กลายเป็น 2 แหล่งความจริงที่ขัดกันเอง"),
+    ("ขั้นสกรีนล้มไม่ได้ทำให้รอบดึงล้ม",
+     "run_daily.ps1 ครอบ try/catch และไม่สนใจ exit code ของขั้นสกรีน "
+     "อีเมลถอยไปแนบไฟล์ดิบให้อัตโนมัติ",
+     "ดึงสำเร็จ 15 ร้านแล้วไม่ได้อะไรเลยเพราะตัวสกรีนสะดุด"),
+    ("ใช้ Python ตัวเดียวกัน",
+     "ระบบสกรีนไม่มี .venv ของตัวเอง จึงเรียกด้วย .venv ของระบบดึง "
+     "ซึ่งมี pandas + openpyxl ครบตามที่ match_sku.py ต้องใช้",
+     "ถ้าต่างคนต่างมี venv แล้วเวอร์ชันไม่ตรง จะได้ผลลัพธ์ต่างกันโดยไม่มีใครรู้"),
+]
+for who, how, why in RULES:
+    ws.cell(row=r, column=1, value=who).font = Font(name=FONT, bold=True, size=10)
+    ws.cell(row=r, column=2, value=how)
+    ws.cell(row=r, column=3, value=why)
+    for j in range(1, 4):
+        c = ws.cell(row=r, column=j)
+        c.border = BOX
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        if not c.font.bold:
+            c.font = Font(name=FONT, size=10)
+    ws.row_dimensions[r].height = 54
+    r += 1
+
+r += 1
+ws.cell(row=r, column=1, value="⚠️ จุดเดียวที่ 2 ระบบผูกกันจริง").font = Font(
+    name=FONT, bold=True, size=12, color="C00000")
+r += 1
+COUPLE = [
+    "schema 32 คอลัมน์ของชั้นที่ 1 คือ 'สัญญา' ระหว่าง 2 ระบบ",
+    "DD ของ osuka-sku เขียนไว้เองว่า \"จำนวนคอลัมน์ดิบเปลี่ยนตาม schema ของไฟล์ต้นทาง\"",
+    "แปลว่า ถ้าเราเพิ่ม/ลบ/เปลี่ยนชื่อคอลัมน์ในชั้นที่ 1 ไฟล์ 63 คอลัมน์จะเปลี่ยนตามทันที",
+    "ตัวสกรีนต้องการจริง ๆ แค่ 3 คอลัมน์: product_name · sku · variation",
+    "→ ถ้าจะแก้ schema ชั้นที่ 1 ต้องแจ้งฝั่ง osuka-sku ก่อน โดยเฉพาะ 3 คอลัมน์นี้",
+]
+for line in COUPLE:
+    ws.cell(row=r, column=1, value=line).font = Font(name=FONT, size=10)
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    r += 1
+
+r += 1
+ws.cell(row=r, column=1, value="ข้อที่ DD ของ osuka-sku เตือนไว้ แต่ไม่ใช้กับท่อนี้").font = Font(
+    name=FONT, bold=True, size=11, color="806000")
+r += 1
+ws.cell(row=r, column=1,
+        value="เขาเขียนว่า \"buyer_username ยกมาจากไฟล์ต้นทางแบบไม่ mask — ต้องจัดการก่อนเข้าฐานข้อมูล\"  "
+              "ข้อนี้เป็นจริงเฉพาะตอนเขารับไฟล์ดิบจากแพลตฟอร์มโดยตรง  "
+              "แต่ท่อของเราป้อนไฟล์ที่ mask มาแล้ว (include_pii = false)  "
+              "ตรวจจริงกับผลลัพธ์วันที่ 2026-08-10 ทั้ง 7 ร้านที่มีค่า: mask ครบ 100% "
+              "เช่น n****0 · f**********m  →  ข้อมูลที่ส่งเข้าฐานไม่มี PII").font = Font(
+    name=FONT, size=10)
+ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+ws.cell(row=r, column=1).fill = PatternFill("solid", fgColor=WARN)
+ws.row_dimensions[r].height = 60
+ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+
+for col, w in zip("ABCDE", (30, 52, 52, 26, 24)):
+    ws.column_dimensions[col].width = w
 
 # ══════════ ชีท 4: รายชื่อร้าน ══════════
 ws = wb.create_sheet("รายชื่อร้าน")
