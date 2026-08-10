@@ -14,6 +14,8 @@ param(
     [switch]$SkipIfDone,
     # ข้ามขั้นตรวจความพร้อม — ใช้ตอนสั่งดึงร้านเดียวซ้ำ ๆ จะได้ไม่เสียเวลา
     [switch]$SkipPreflight,
+    # ข้ามขั้นสกรีน SKU — ใช้ตอนอยากได้ไฟล์ดิบอย่างเดียว
+    [switch]$SkipScreen,
     # ส่งอีเมลท้ายรอบ = การันตีว่าอีเมลออกหลังดึงเสร็จเสมอ
     # (เครื่องเป็นโน้ตบุ๊ก เปิด 8 โมง รอบดึงจะเริ่มตอนล็อกอิน ไม่ใช่ตี 6
     #  ถ้าตั้งอีเมลตามนาฬิกาจะส่งตอนข้อมูลยังไม่ครบ)
@@ -76,6 +78,30 @@ try {
     Write-Host "Dashboard: output\dashboard.html" -ForegroundColor Cyan
 } catch {
     Write-Host "สร้าง Dashboard ไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
+}
+
+# ── สกรีน SKU ต่อจากรอบดึง ────────────────────────────────────
+#
+# ของส่งมอบจริงคือไฟล์ 63 คอลัมน์ที่ผ่านการสกรีนแล้ว ไม่ใช่ไฟล์ดิบ 32 คอลัมน์
+# (เจ้าของงานยืนยัน 2026-08-10) ไฟล์ดิบยังต้องมีเพราะเป็น input ของตัวสกรีน
+#
+# ⚠️ ห้ามให้ขั้นนี้ทำให้ exit code ของรอบดึงเพี้ยน — ดึงสำเร็จก็คือสำเร็จ
+#    ถ้าสกรีนพัง อีเมลจะถอยไปแนบไฟล์ดิบให้เอง (ดู collect_attachments)
+#    ส่งของที่มีดีกว่าไม่ส่งอะไรเลย
+if (-not $SkipScreen) {
+    Write-Host "── สกรีน SKU ──" -ForegroundColor Cyan
+    try {
+        # ไม่ใส่ --date = ใช้วันนี้ ซึ่งตรงกับชื่อโฟลเดอร์ output ที่รอบดึงเพิ่งสร้าง
+        $screenArgs = @("-u", "scripts\screen_orders.py")
+        if ($Date) { $screenArgs += @("--date", $Date) }
+        & $py @screenArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "สกรีนไม่ครบ — อีเมลจะแนบไฟล์ดิบแทน" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "รันตัวสกรีนไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
+    }
+    Write-Host ""
 }
 
 # ครอบ try/catch เหมือน Dashboard: อีเมลไม่ออกไม่ควรทำให้ exit code ของรอบเพี้ยน

@@ -189,13 +189,28 @@ def build_html(run_date: str, rows: list[dict],
 
 def collect_attachments(output_dir: Path, run_date: str,
                         with_excel: bool = True) -> list[Path]:
+    """ไฟล์ที่แนบไปกับอีเมล
+
+    ⚠️ ของส่งมอบคือไฟล์ที่ผ่านการสกรีน SKU แล้ว (63 คอลัมน์) ไม่ใช่ไฟล์ดิบ 32 คอลัมน์
+       เจ้าของงานยืนยัน 2026-08-10 — ไฟล์ 32 คอลัมน์เป็นแค่ของกลางที่ป้อนให้ตัวสกรีน
+
+    ถ้ายังไม่มีโฟลเดอร์ screened/ (เช่นวันที่ตัวสกรีนพัง หรือรันแบบไม่สกรีน)
+    จะถอยไปแนบไฟล์ดิบแทน — ส่งของที่มีดีกว่าไม่ส่งอะไรเลย
+    """
     files: list[Path] = []
     dash = output_dir / "dashboard.html"
     if dash.exists():
         files.append(dash)
-    if with_excel:
-        files += sorted((output_dir / run_date).glob("*.xlsx"))
-    return files
+    if not with_excel:
+        return files
+
+    day = output_dir / run_date
+    screened = day / "screened"
+    if screened.is_dir():
+        got = sorted(screened.glob("*.xlsx"))
+        if got:
+            return files + got
+    return files + sorted(day.glob("*.xlsx"))
 
 
 MARK = "[ดึงยอดขาย]"          # ใช้หาว่านัดหมายไหนเป็นของระบบนี้ ตอนลบ/สร้างใหม่
