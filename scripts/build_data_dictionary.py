@@ -20,7 +20,16 @@ from openpyxl.utils import get_column_letter
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.core.config import load_config                    # noqa: E402
 from src.core.models import EXCEL_COLUMNS, OrderStatus     # noqa: E402
+from src.core.naming import canonical_name                 # noqa: E402
+
+# นับร้านจาก shops.yaml จริง — ห้ามพิมพ์ตัวเลขไว้ในเอกสาร
+_SHOPS = load_config().shops
+_ON = [s for s in _SHOPS if s.enabled]
+_BRANDS = {canonical_name(s.shop_id, s.display_name) for s in _ON}
+SCOPE_TEXT = (f"{len(_SHOPS)} หน้าร้าน (เปิดใช้งาน {len(_ON)}) · "
+              f"{len(_BRANDS)} ชื่อร้าน · 3 แพลตฟอร์ม")
 
 OUT = PROJECT_ROOT / "docs" / "Data_Dictionary_คำสั่งซื้อ.xlsx"
 FILL_RATE = PROJECT_ROOT / "docs" / "column_fill_rate.json"
@@ -191,7 +200,7 @@ r = title(ws, "Data Dictionary — ข้อมูลคำสั่งซื้
 META = [
     ("เจ้าของข้อมูล", "ทีม Marketplace"),
     ("แหล่งที่มา", "หลังบ้านร้านค้าของเราเอง — Lazada / TikTok Shop / Shopee Seller Centre"),
-    ("ขอบเขต", "13 หน้าร้าน · 9 ชื่อร้าน · 3 แพลตฟอร์ม"),
+    ("ขอบเขต", SCOPE_TEXT),
     ("ความถี่", "รายวัน 08:30 น. ดึงข้อมูลของเมื่อวาน"),
     ("Time zone", "Asia/Bangkok ทุกคอลัมน์เวลา (ไม่มี timezone offset ต่อท้าย)"),
     ("สกุลเงิน", "บาท (THB) ทุกคอลัมน์เงิน"),
@@ -576,48 +585,56 @@ for col, w in zip("ABCDE", (30, 52, 52, 26, 24)):
 
 # ══════════ ชีท 4: รายชื่อร้าน ══════════
 ws = wb.create_sheet("รายชื่อร้าน")
-r = title(ws, "รายชื่อร้าน — 9 ชื่อร้าน จาก 13 หน้าร้าน",
+r = title(ws, f"รายชื่อร้าน — {SCOPE_TEXT}",
           "ชื่อจริงบนแพลตฟอร์มต่างจากชื่อในไฟล์ เพราะร้านเดียวกันตั้งชื่อไม่ตรงกันในแต่ละเจ้า")
 for i, h in enumerate(["shop_name (ในไฟล์)", "shop_id", "แพลตฟอร์ม", "ชื่อจริงบนแพลตฟอร์ม"], start=1):
     ws.cell(row=r, column=i, value=h)
 style_header(ws, r, 4)
 r += 1
 
-SHOPS = [
-    ("กัปตัน เอกสตีล", "lazada_01", "Lazada", "กัปตัน เอกสตีล"),
-    ("กัปตัน เอกสตีล", "shopee_06", "Shopee", "กัปตัน เอกสตีล"),
-    ("Powerstools", "tiktok_01", "TikTok", "powerstool  ← ไม่มี s"),
-    ("Powerstools", "shopee_04", "Shopee", "Powerstools"),
-    ("เฮียเก๋า เครื่องมือช่างราคาถูก", "tiktok_05", "TikTok", "เฮียเก๋าเครื่องมือช่าง ราคาถูก  ← เว้นวรรคคนละที่"),
-    ("เฮียเก๋า เครื่องมือช่างราคาถูก", "shopee_05", "Shopee", "เฮียเก๋า เครื่องมือช่างราคาถูก"),
-    ("TNLTOOLSTORE", "shopee_03", "Shopee", "Toolspartner  ← คนละชื่อเลย"),
-    ("TNLTOOLSTORE", "shopee_08", "Shopee", "TNLTOOLSTORE"),
-    ("toolsdee1", "tiktok_02", "TikTok", "toolsdee1"),
-    ("ฝ้ายการช่าง", "tiktok_03", "TikTok", "ฝ้ายการช่าง"),
-    ("100อัน1000อย่าง", "tiktok_04", "TikTok", "100อัน1000อย่าง88  ← มี 88 ต่อท้าย"),
-    ("เฮียคิมคลองถม", "shopee_01", "Shopee", "เฮียคิมคลองถม"),
-    ("Smarttooltech", "shopee_02", "Shopee", "Smarttooltech"),
-]
+# ⚠️ อ่านจาก shops.yaml จริง ห้ามพิมพ์รายชื่อร้านไว้ในโค้ดนี้
+#    เคยฝังไว้ตายตัวแล้วเพิ่มร้านใหม่ 3 ร้าน เอกสารยังโชว์ 13 ร้านเหมือนเดิม
+#    เจ้าของงานเป็นคนจับได้ ไม่ใช่ระบบ (2026-08-10)
+PLAT_LABEL = {"lazada": "Lazada", "tiktok": "TikTok", "shopee": "Shopee"}
+shops_cfg = sorted(
+    load_config().shops,
+    key=lambda s: (canonical_name(s.shop_id, s.display_name), s.shop_id))
+
 prev = None
-for name, sid, plat, real in SHOPS:
-    ws.cell(row=r, column=1, value=name)
-    ws.cell(row=r, column=2, value=sid)
-    ws.cell(row=r, column=3, value=plat)
-    ws.cell(row=r, column=4, value=real)
-    diff = "←" in real
+for s in shops_cfg:
+    brand = canonical_name(s.shop_id, s.display_name)
+    diff = s.display_name != brand
+    note = f"{s.display_name}  ← คนละชื่อกับชื่อรวม" if diff else s.display_name
+    if not s.enabled:
+        note += f"   ⚪ ปิดไว้: {s.skip_reason or 'ไม่ระบุเหตุผล'}"
+
+    ws.cell(row=r, column=1, value=brand)
+    ws.cell(row=r, column=2, value=s.shop_id)
+    ws.cell(row=r, column=3, value=PLAT_LABEL.get(s.platform, s.platform))
+    ws.cell(row=r, column=4, value=note)
     for j in range(1, 5):
         c = ws.cell(row=r, column=j)
         c.border = BOX
-        c.font = Font(name=FONT, size=10, bold=(j == 1 and name != prev))
-        if diff:
+        c.font = Font(name=FONT, size=10, bold=(j == 1 and brand != prev))
+        if not s.enabled:
+            c.fill = PatternFill("solid", fgColor=GREY)
+        elif diff:
             c.fill = PatternFill("solid", fgColor=WARN)
-    prev = name
+    prev = brand
     r += 1
+
+n_on = sum(1 for s in shops_cfg if s.enabled)
 r += 1
 ws.cell(row=r, column=1,
-        value="แถวสีเหลือง = ชื่อจริงบนแพลตฟอร์มไม่ตรงกับ shop_name ในไฟล์").font = Font(
+        value=f"เหลือง = ชื่อจริงบนแพลตฟอร์มไม่ตรงกับชื่อรวม · "
+              f"เทา = ปิดไว้ ไม่เข้ารอบดึงและไม่ขึ้นในอีเมล").font = Font(
     name=FONT, size=9, italic=True, color="806000")
-for col, w in zip("ABCD", (34, 14, 12, 46)):
+r += 1
+ws.cell(row=r, column=1,
+        value=f"รวม {len(shops_cfg)} หน้าร้าน · เปิดใช้งาน {n_on} · "
+              f"{len({canonical_name(s.shop_id, s.display_name) for s in shops_cfg if s.enabled})} ชื่อร้าน"
+        ).font = Font(name=FONT, size=10, bold=True)
+for col, w in zip("ABCD", (34, 14, 12, 56)):
     ws.column_dimensions[col].width = w
 
 # ══════════ ชีท 5: ค่าที่เป็นไปได้ ══════════
