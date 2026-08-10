@@ -136,7 +136,8 @@ def title(ws, text: str, sub: str = "") -> int:
 ws = wb.active
 ws.title = "ภาพรวม"
 r = title(ws, "Data Dictionary — ข้อมูลคำสั่งซื้อร้านค้าออนไลน์",
-          "ทุกตัวเลข % วัดจากข้อมูลจริง 660,181 แถว (ม.ค.–ก.ค. 2026) ไม่ใช่ค่าที่คาดเดา")
+          "ทุกตัวเลข % วัดจากข้อมูลจริง 660,181 แถว (ม.ค.–ก.ค. 2026) ไม่ใช่ค่าที่คาดเดา · "
+          "ปรับตามคำตอบจากฝั่งฐานข้อมูล 2026-08-10")
 
 META = [
     ("เจ้าของข้อมูล", "ทีม Marketplace"),
@@ -149,6 +150,9 @@ META = [
     ("จำนวนคอลัมน์", len(EXCEL_COLUMNS)),
     ("Grain (1 แถวคืออะไร)", "1 รายการสินค้าในออเดอร์ (order line) — ไม่ใช่ 1 ออเดอร์"),
     ("การปกปิดข้อมูลส่วนบุคคล", "เปิดใช้ (include_pii = false) — ไม่มีชื่อ-นามสกุล เบอร์โทร ที่อยู่"),
+    ("ปลายทางที่ตกลงกัน",
+     "Postgres — ส่งเป็น 2 ตาราง order_header + order_line (รอรายละเอียดการเชื่อมต่อ)"),
+    ("ช่วงข้อมูลที่ตกลงกัน", "1 ม.ค. 2026 ถึง D-1 (เมื่อวาน) และต่อเนื่องทุกวัน"),
 ]
 for k, v in META:
     ws.cell(row=r, column=1, value=k).font = Font(name=FONT, bold=True, size=10)
@@ -438,26 +442,68 @@ for k, res, note in KEYS:
     r += 1
 
 r += 1
-ws.cell(row=r, column=1, value="ข้อเสนอสำหรับ schema").font = Font(
+ws.cell(row=r, column=1, value="โครงตาราง Postgres — แยก 2 ระดับตามที่ฝั่งฐานข้อมูลขอ").font = Font(
     name=FONT, bold=True, size=12, color=NAVY)
 r += 1
-DDL = """CREATE TABLE order_line (
-    id                BIGSERIAL PRIMARY KEY,      -- surrogate key ปลอดภัยที่สุด
-    order_id          VARCHAR(64)  NOT NULL,      -- TEXT เท่านั้น ห้าม BIGINT
-    platform          VARCHAR(16)  NOT NULL,
-    shop_id           VARCHAR(32)  NOT NULL,
-    shop_name         VARCHAR(128) NOT NULL,      -- ชื่อมาตรฐาน 1 ชื่อมีได้หลาย shop_id
-    order_created_at  TIMESTAMP    NOT NULL,      -- Asia/Bangkok
-    sku               VARCHAR(128),               -- ว่างได้ ~3%
-    quantity          INT,
-    item_price        DECIMAL(12,2),
-    total_amount      DECIMAL(12,2),              -- ระดับออเดอร์ ห้าม SUM ตรง ๆ
-    ...
-    UNIQUE (platform, order_id, sku)              -- จับข้อมูลซ้ำตอน import
+ws.cell(row=r, column=1,
+        value="แยกแล้วหมดปัญหายอดซ้ำจาก grain — SUM(total_amount) บน order_header "
+              "ได้ยอดขายจริงทันที ไม่ต้องระวัง DISTINCT").font = Font(
+    name=FONT, size=9, italic=True, color="595959")
+r += 1
+DDL = """-- ═══ ตารางที่ 1: ระดับออเดอร์ (1 แถว = 1 ออเดอร์) ═══
+CREATE TABLE order_header (
+    order_id          VARCHAR(64)  NOT NULL,   -- TEXT เท่านั้น ห้าม BIGINT
+    platform          VARCHAR(16)  NOT NULL,   -- lazada / tiktok / shopee
+    shop_id           VARCHAR(32)  NOT NULL,   -- หน้าร้าน เช่น shopee_09
+    shop_name         VARCHAR(128) NOT NULL,   -- ชื่อมาตรฐาน 1 ชื่อมีได้หลาย shop_id
+    order_created_at  TIMESTAMP    NOT NULL,   -- Asia/Bangkok (ไม่มี offset)
+    order_updated_at  TIMESTAMP,
+    paid_at           TIMESTAMP,               -- Lazada ไม่มี
+    order_status      VARCHAR(16)  NOT NULL,   -- 7 ค่า ดูชีท 'ค่าที่เป็นไปได้'
+    status_raw        VARCHAR(64),             -- ค่าดิบไว้ย้อนตรวจการ map
+    payment_method    VARCHAR(64),
+    shipping_fee      DECIMAL(12,2),
+    shipping_carrier  VARCHAR(64),
+    tracking_no       VARCHAR(64),             -- TEXT เท่านั้น
+    total_amount      DECIMAL(12,2),           -- ยอดที่ลูกค้าจ่ายทั้งออเดอร์
+    buyer_username    VARCHAR(64),             -- ถูก mask ตาม PDPA
+    province          VARCHAR(64),             -- Lazada ไม่มี
+    cancel_reason     VARCHAR(256),
+    return_status     VARCHAR(64),
+    fetched_at        TIMESTAMP    NOT NULL,
+    PRIMARY KEY (platform, order_id)
 );
 
-CREATE INDEX idx_created  ON order_line (order_created_at);
-CREATE INDEX idx_shop_day ON order_line (shop_id, order_created_at);"""
+-- ═══ ตารางที่ 2: ระดับสินค้า (1 แถว = 1 รายการในออเดอร์) ═══
+CREATE TABLE order_line (
+    id                BIGSERIAL PRIMARY KEY,
+    order_id          VARCHAR(64)  NOT NULL,
+    platform          VARCHAR(16)  NOT NULL,
+    sku               VARCHAR(128),            -- ว่างได้ ~3% (93,486 จาก 660,181)
+    product_name      VARCHAR(512),
+    variation         VARCHAR(256),
+    quantity          INT,
+    item_price        DECIMAL(12,2),
+    seller_discount   DECIMAL(12,2),
+    platform_discount DECIMAL(12,2),
+    notes             VARCHAR(512),            -- เหตุผลที่บางคอลัมน์ว่าง
+    FOREIGN KEY (platform, order_id) REFERENCES order_header (platform, order_id),
+    UNIQUE (platform, order_id, sku)           -- ทดสอบแล้วไม่ซ้ำทั้ง 660,181 แถว
+);
+
+CREATE INDEX idx_hdr_created ON order_header (order_created_at);
+CREATE INDEX idx_hdr_shop    ON order_header (shop_id, order_created_at);
+CREATE INDEX idx_hdr_name    ON order_header (shop_name, order_created_at);
+CREATE INDEX idx_line_order  ON order_line   (platform, order_id);
+
+-- ⚠️ ไม่ใส่ commission_fee / transaction_fee / service_fee / settlement_amount
+--    ฝั่งฐานข้อมูลตอบว่า No need และเรายังไม่มีข้อมูลจริงอยู่ดี (ว่าง 0% ทุกแพลตฟอร์ม)
+--    ถ้าวันหนึ่งเปิดใช้ ให้เพิ่มเข้า order_header
+
+-- ⚠️ นำเข้าด้วย upsert ไม่ใช่ insert อย่างเดียว
+--    สถานะออเดอร์เปลี่ยนได้หลังดึงไปแล้ว (SHIPPED -> DELIVERED / ถูกยกเลิกภายหลัง)
+--    ON CONFLICT (platform, order_id) DO UPDATE ...
+"""
 for line in DDL.split("\n"):
     c = ws.cell(row=r, column=1, value=line)
     c.font = Font(name="Consolas", size=9)
@@ -467,44 +513,64 @@ for col, w in zip("ABC", (78, 16, 56)):
     ws.column_dimensions[col].width = w
 
 # ══════════ ชีท 7: คำถามที่ต้องตัดสินใจ ══════════
-ws = wb.create_sheet("คำถามที่ต้องตัดสินใจ")
-r = title(ws, "คำถามที่ยังเปิดอยู่ — ต้องคุยกันก่อนออกแบบเสร็จ")
-for i, h in enumerate(["#", "คำถาม", "ทำไมต้องตอบ", "คำตอบ"], start=1):
+ws = wb.create_sheet("คำตอบจากฝั่งฐานข้อมูล")
+r = title(ws, "คำตอบจากฝั่งฐานข้อมูล — ได้รับ 2026-08-10",
+          "5 ข้อนี้ตอบครบแล้ว ใช้เป็นข้อกำหนดในการส่งมอบต่อจากนี้")
+for i, h in enumerate(["#", "คำถาม", "คำตอบที่ได้รับ", "สิ่งที่ต้องทำต่อ"], start=1):
     ws.cell(row=r, column=i, value=h)
 style_header(ws, r, 4)
 r += 1
 QS = [
     ("ต้องการข้อมูลย้อนหลังถึงเมื่อไหร่",
-     "ตอนนี้มี ม.ค.–ก.ค. 2026 จำนวน 660,181 แถว พร้อมส่งทันที ถ้าต้องการเก่ากว่านี้ต้องดึงเพิ่ม"),
+     "From 1 Jan 2026 till latest date D-1",
+     "ตรงกับที่มีอยู่แล้ว — ม.ค. 2026 ถึงเมื่อวาน ไม่ต้องดึงเพิ่ม "
+     "ระบบดึงของ D-1 ทุกเช้าอยู่แล้ว จึงต่อเนื่องได้เอง"),
     ("จะรับข้อมูลอย่างไร",
-     "ไฟล์ Excel รายวัน / วางบน SharePoint / หรือให้เราเขียนเข้าฐานข้อมูลโดยตรง "
-     "แต่ละแบบใช้เวลาเตรียมต่างกัน"),
+     "Export ลง Postgres โดยตรง (รายละเอียดการเชื่อมต่อจะให้ในรอบถัดไป)",
+     "รอ host / database / schema / user จากฝั่งฐานข้อมูล "
+     "แล้วเราเขียนตัวส่งเข้า Postgres — ดูโครงตารางที่ชีท 'คีย์และ schema'"),
     ("ต้องการตารางระดับออเดอร์แยกอีกตารางไหม",
-     "จะได้ไม่ต้องระวังเรื่องยอดซ้ำจาก grain ระดับสินค้า ลดโอกาสคำนวณยอดขายผิด"),
+     "Yes — ให้แยกตารางออเดอร์ออกมา",
+     "ส่ง 2 ตาราง: order_header (1 แถว = 1 ออเดอร์) + order_line (1 แถว = 1 สินค้า) "
+     "แก้ปัญหายอดซ้ำจาก grain ได้ที่ต้นทาง"),
     ("ต้องการค่าธรรมเนียมและ settlement ไหม",
-     "ยังไม่มีข้อมูล ถ้าจำเป็นต้องขออนุญาตเข้าถึงเมนูการเงินของแต่ละแพลตฟอร์มก่อน"),
+     "No need",
+     "ไม่ต้องขออนุญาตเข้าเมนูการเงิน — 4 คอลัมน์นั้นยังคงไว้ในตารางแต่จะเป็น NULL เสมอ "
+     "หรือจะตัดออกก็ได้ถ้าฝั่งฐานข้อมูลต้องการ"),
     ("ต้องการข้อมูลผู้ซื้อแบบไม่ปกปิดไหม",
-     "ตอนนี้ปกปิดตาม PDPA ถ้าต้องการข้อมูลเต็มต้องผ่านการอนุมัติเรื่องข้อมูลส่วนบุคคลก่อน"),
+     "No need — ให้ทำตาม PDPA ปกปิด PII ต่อไป",
+     "คงค่า include_pii = false ไว้เหมือนเดิม "
+     "buyer_username ยังถูก mask · ไม่มีชื่อ-เบอร์-ที่อยู่ในข้อมูลที่ส่ง"),
 ]
-for i, (q, why) in enumerate(QS, start=1):
+for i, (q, ans, todo) in enumerate(QS, start=1):
     ws.cell(row=r, column=1, value=i)
     ws.cell(row=r, column=2, value=q).font = Font(name=FONT, bold=True, size=10)
-    ws.cell(row=r, column=3, value=why)
-    ws.cell(row=r, column=4, value="")
+    c_ans = ws.cell(row=r, column=3, value=ans)
+    c_ans.font = Font(name=FONT, bold=True, size=10, color="1F6F1F")
+    ws.cell(row=r, column=4, value=todo)
     for j in range(1, 5):
         c = ws.cell(row=r, column=j)
         c.border = BOX
         c.alignment = Alignment(wrap_text=True, vertical="top")
         if not c.font.bold:
             c.font = Font(name=FONT, size=10)
-        if j == 4:
-            c.fill = PatternFill("solid", fgColor="FFFF00")
-    ws.row_dimensions[r].height = 44
+        if j == 3:
+            c.fill = PatternFill("solid", fgColor=OKBG)
+    ws.row_dimensions[r].height = 50
     r += 1
 r += 1
-ws.cell(row=r, column=1, value="ช่องสีเหลือง = ให้ฝั่งฐานข้อมูลกรอกกลับมา").font = Font(
-    name=FONT, size=9, italic=True, color="806000")
-for col, w in zip("ABCD", (5, 40, 62, 36)):
+ws.cell(row=r, column=1,
+        value="ช่องสีเขียว = คำตอบที่ได้รับจากฝั่งฐานข้อมูล 2026-08-10").font = Font(
+    name=FONT, size=9, italic=True, color="1F6F1F")
+r += 2
+ws.cell(row=r, column=1, value="ยังต้องรออีก 1 อย่าง").font = Font(
+    name=FONT, bold=True, size=11, color="C00000")
+r += 1
+ws.cell(row=r, column=1,
+        value="รายละเอียดการเชื่อมต่อ Postgres (host / port / database / schema / user / วิธียืนยันตัวตน) "
+              "— ยังส่งข้อมูลเข้าฐานไม่ได้จนกว่าจะได้ครบ").font = Font(name=FONT, size=10)
+ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+for col, w in zip("ABCD", (5, 34, 40, 52)):
     ws.column_dimensions[col].width = w
 
 OUT.parent.mkdir(exist_ok=True)
