@@ -64,11 +64,21 @@ def main() -> int:
         print("   ระบุที่อยู่ด้วย --screener หรือตั้งตัวแปร OSUKA_SKU_DIR")
         return 1
 
-    inbox = screener / "input"
+    # ⚠️ ห้ามใช้ input/ ของเขาโดยตรง — โฟลเดอร์นั้นมีไฟล์เก่าของเขาค้างอยู่
+    #    ตัวสกรีนอ่าน "ทุกไฟล์ในโฟลเดอร์" แล้วสรุปรวมเป็น brand_summary / data_issues
+    #    ถ้าปนไฟล์คนละวัน รายงานที่แนบไปกับอีเมลจะรวมข้อมูลข้ามวันโดยไม่มีใครรู้
+    #    (เจอจริง 2026-08-10: input/ มีไฟล์วันที่ 05 ค้าง 3 ไฟล์ ทำให้สกรีน 19 แทนที่จะเป็น 16)
+    #
+    #    ใช้โฟลเดอร์ของเราเองแยกต่างหาก และล้างก่อนทุกครั้ง
+    #    ได้ผลพลอยได้คือไม่ไปแตะไฟล์ของเขาเลยแม้แต่ไฟล์เดียว
+    inbox = screener / "input_daily"
     outbox = screener / "output"
+    if inbox.exists():
+        for old in inbox.glob("*.xlsx"):
+            old.unlink()
     inbox.mkdir(parents=True, exist_ok=True)
 
-    print(f"=== ส่งไฟล์เข้าระบบสกรีน {len(raw)} ไฟล์ ===")
+    print(f"=== ส่งไฟล์เข้าระบบสกรีน {len(raw)} ไฟล์ (โฟลเดอร์ {inbox.name}) ===")
     for f in raw:
         shutil.copy2(f, inbox / f.name)
         print(f"  → {f.name}")
@@ -78,7 +88,8 @@ def main() -> int:
     # โปรเจกต์สกรีนไม่มี venv ของตัวเอง จึงไม่มีอะไรให้ชนกัน
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     res = subprocess.run(
-        [sys.executable, "-u", str(match_py), "--input", "input/", "--out", "output/"],
+        [sys.executable, "-u", str(match_py),
+         "--input", f"{inbox.name}/", "--out", "output/"],
         cwd=screener, capture_output=True, text=True,
         encoding="utf-8", errors="replace", env=env, timeout=3600,
     )
