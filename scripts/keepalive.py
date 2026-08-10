@@ -129,6 +129,7 @@ def main() -> int:
         print(f"  เคลียร์ Chrome ค้าง {closed} process")
 
     ok = bad = 0
+    need_login: list[str] = []
     try:
         with run_lock(PROJECT_ROOT / cfg.settings.paths.lock_file):
             for s, age in todo:
@@ -137,6 +138,8 @@ def main() -> int:
                 print(f"  {mark} {s.shop_id:<11} (อายุ {age:.1f} ชม.) {msg}", flush=True)
                 log.info("keepalive", shop_id=s.shop_id, ok=good,
                          age_hours=round(age, 1), msg=msg)
+                if not good and "AUTH" in msg:
+                    need_login.append(s.shop_id)
                 ok, bad = ok + good, bad + (not good)
                 time.sleep(3)
     except AlreadyRunningError:
@@ -144,6 +147,12 @@ def main() -> int:
         return 0
 
     print(f"\nต่ออายุสำเร็จ {ok} · ไม่สำเร็จ {bad}")
+    if need_login:
+        # บอกให้ชัดว่าต้องทำอะไรกับร้านไหน ไม่ใช่แค่ตัวเลข
+        # ถ้าเห็นตั้งแต่กลางวัน จะได้ล็อกอินตอนสะดวก ไม่ใช่มารู้ตอน 08:30
+        print(f"\n⚠️  ต้องล็อกอินเอง {len(need_login)} ร้าน: {', '.join(need_login)}")
+        for sid in need_login:
+            print(f"    .\\.venv\\Scripts\\python.exe scripts\\login_save.py --shop {sid}")
     # ไม่สำเร็จ = ต้องมีคนล็อกอิน แต่ไม่ควรทำให้ตัวตั้งเวลาขึ้นแดงทุกวัน
     # จึงคืน 0 เสมอ แล้วให้ดูรายละเอียดใน log แทน
     return 0
