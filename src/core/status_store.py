@@ -58,6 +58,12 @@ class StatusStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # ⚠️ ต้องตั้ง 2 อย่างนี้ ไม่งั้นรันหลายโปรเซสพร้อมกันจะเจอ "database is locked"
+        #    WAL         : ให้คนอ่าน (Dashboard) อ่านได้ขณะมีคนเขียน ไม่บล็อกกัน
+        #    busy_timeout: ถ้าชนกันจริงให้รอคิว 30 วินาที แทนที่จะโยน error ทันที
+        #    จำเป็นตอนดึงย้อนหลังแบบขนานหลายสาย ซึ่งทุกสายเขียน run_log ตัวเดียวกัน
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
         self._conn.commit()

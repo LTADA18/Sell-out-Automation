@@ -98,6 +98,10 @@ class ShopeeAdapter(PlaywrightAdapter):
     base_url_env = "SHOPEE_SELLER_URL"
     login_path = "/account/signin"
 
+    # รอไฟล์ในประวัติการดาวน์โหลดนานสุดกี่วินาที
+    # 300 พอสำหรับรอบรายวัน (ช่วง 1 วัน) แต่ช่วงยาวต้องยืด — ผู้เรียกตั้งทับได้
+    report_timeout_sec: int = 300
+
     # ⚠️ หน้า login ของ Shopee อยู่คนละโดเมนกับ Seller Centre
     #    (accounts.shopee.co.th ไม่ใช่ seller.shopee.co.th)
     #    LOGIN_URL_HINTS ใน playwright_base จับ "/login" ได้อยู่แล้วจึงครอบคลุม
@@ -521,7 +525,10 @@ class ShopeeAdapter(PlaywrightAdapter):
             raise AdapterError(ErrorType.PARSE_ERROR, 'กดปุ่มยืนยัน "ดาวน์โหลด" ในกล่องไม่ได้')
         page.wait_for_timeout(4000)
 
-        label = self._wait_for_report(page, before, date_from, date_to)
+        # ช่วงยาวใช้เวลาปั่นไฟล์นานกว่ามาก — ให้ผู้เรียกยืดเวลารอได้
+        # (2026-08-10: ขอช่วง 9 วัน ไฟล์โผล่ในประวัติแล้วแต่ยังปั่นไม่เสร็จใน 300 วินาที)
+        label = self._wait_for_report(page, before, date_from, date_to,
+                                      timeout_sec=self.report_timeout_sec)
         log.info("shopee_report_ready", shop_id=self.shop.shop_id, file=label)
 
         btn = self._row_download_button(page, label)
