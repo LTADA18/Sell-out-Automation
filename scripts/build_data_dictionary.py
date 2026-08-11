@@ -100,6 +100,10 @@ def pct(col: str, plat: str) -> float | None:
     return None if v is None else round(v / 100, 3)        # เก็บเป็นเศษส่วน ให้ format เป็น %
 
 
+# จำนวนคอลัมน์ของชั้นที่ 1 — คำนวณจากของจริง ห้ามเขียนเลขตายตัว
+# เคยฝังเลข 32 กับ 63 ไว้ทั่วไฟล์ พอเพิ่มคอลัมน์การเงินแล้วต้องไล่แก้ 9 จุด
+N_LAYER1 = len(EXCEL_COLUMNS)
+
 # ── นิยามคอลัมน์: (ชนิด, null ได้ไหม, กลุ่ม, คำอธิบาย, หมายเหตุสำคัญ) ──
 DEFS: dict[str, tuple[str, str, str, str, str]] = {
     "order_id": ("VARCHAR(64)", "ไม่", "ตัวตน", "เลขออเดอร์จากแพลตฟอร์ม",
@@ -266,7 +270,7 @@ ws.column_dimensions["B"].width = 76
 
 # ══════════ ชีท 2: Data Dictionary ══════════
 ws = wb.create_sheet("Data Dictionary")
-ws["A1"] = "Data Dictionary — 32 คอลัมน์ เรียงตามลำดับในไฟล์"
+ws["A1"] = f"Data Dictionary — {N_LAYER1} คอลัมน์ เรียงตามลำดับในไฟล์"
 ws["A1"].font = Font(name=FONT, bold=True, size=13, color=NAVY)
 ws["A2"] = ("คอลัมน์ % = สัดส่วนแถวที่มีค่าจริง วัดจากข้อมูลจริง · "
             "0% = ว่างทั้งแพลตฟอร์มนั้น ไม่ใช่ข้อมูลหาย")
@@ -333,11 +337,48 @@ for i, col in enumerate(EXCEL_COLUMNS, start=1):
 for col, w in zip("ABCDEFGHIJK", (5, 22, 16, 9, 14, 42, 10, 10, 10, 18, 60)):
     ws.column_dimensions[col].width = w
 
-# ══════════ ชีท 2.5: ชั้นที่ 2 — หลังสกรีน SKU (63 คอลัมน์) ══════════
-ws = wb.create_sheet("หลังสกรีน 63 คอลัมน์")
+# ══════════ ชีท 2.5: ชั้นที่ 2 — หลังสกรีน SKU ══════════
 screen_rows = read_screen_dd("sku_match_data")
+
+
+def _screened_header() -> list[str]:
+    """นับคอลัมน์จากไฟล์สกรีนจริง ไม่ใช่จาก DD ของระบบสกรีน
+
+    ⚠️ DD ของอีกโปรเจกต์ตามไม่ทันเวลาเราเพิ่มคอลัมน์ ตอนเพิ่มคอลัมน์การเงิน
+       ไฟล์จริงเป็น 68 แล้วแต่ DD ของเขายังเขียน 63 อยู่
+       ของจริงคือไฟล์ ไม่ใช่เอกสาร
+    """
+    out = PROJECT_ROOT / "output"
+    days = sorted((d for d in out.iterdir()
+                   if d.is_dir() and (d / "screened").is_dir()), reverse=True)
+    for d in days:
+        for f in sorted((d / "screened").glob("*_matched.xlsx")):
+            try:
+                wb = load_workbook(f, read_only=True, data_only=True)
+                try:
+                    ws = wb["data"] if "data" in wb.sheetnames else wb[wb.sheetnames[0]]
+                    return [str(c) if c is not None else ""
+                            for c in next(ws.iter_rows(values_only=True))]
+                finally:
+                    wb.close()
+            except Exception:                            # noqa: BLE001
+                continue
+    return []
+
+
+screened_header = _screened_header()
+N_LAYER2 = len(screened_header) or (len(screen_rows) if screen_rows else 0)
+
+# คอลัมน์ที่มีในไฟล์จริงแต่ DD ของระบบสกรีนยังไม่ได้อธิบาย
+_described = {r[0].lstrip("★ ").strip() for r in screen_rows}
+UNDOCUMENTED = [c for c in screened_header if c and c not in _described]
+if UNDOCUMENTED:
+    print(f"  ⚠️ ไฟล์จริงมี {len(screened_header)} คอลัมน์ แต่ DD ของระบบสกรีนอธิบายไว้ "
+          f"{len(screen_rows)} — ยังไม่มีคำอธิบาย {len(UNDOCUMENTED)} ตัว: "
+          f"{', '.join(UNDOCUMENTED)}")
+ws = wb.create_sheet(f"หลังสกรีน {N_LAYER2} คอลัมน์" if N_LAYER2 else "หลังสกรีน")
 r = title(
-    ws, "ชั้นที่ 2 — ไฟล์หลังสกรีน SKU (63 คอลัมน์) = ของที่ส่งมอบจริง",
+    ws, f"ชั้นที่ 2 — ไฟล์หลังสกรีน SKU ({N_LAYER2} คอลัมน์) = ของที่ส่งมอบจริง",
     f"คำอธิบายอ่านสดจาก DD ของระบบ osuka-sku ตอนสร้างไฟล์นี้ ไม่ได้คัดลอกมาเก็บซ้ำ · "
     f"{'อ่านได้ ' + str(len(screen_rows)) + ' คอลัมน์' if screen_rows else 'อ่านไม่ได้ — ดูหมายเหตุ'}")
 
@@ -351,7 +392,8 @@ if not screen_rows:
     ws.column_dimensions["A"].width = 100
 else:
     ws.cell(row=r, column=1,
-            value="63 คอลัมน์ = 32 ของชั้นที่ 1 (ยกมาทั้งดุ้น ไม่ถูกแก้) + 31 ที่ระบบสกรีนเติมให้"
+            value=f"{N_LAYER2} คอลัมน์ = {N_LAYER1} ของชั้นที่ 1 "
+                  f"(ยกมาทั้งดุ้น ไม่ถูกแก้) + {N_LAYER2 - N_LAYER1} ที่ระบบสกรีนเติมให้"
             ).font = Font(name=FONT, size=10, bold=True)
     r += 2
     for i, h in enumerate(["#", "คอลัมน์", "ชนิด", "มาจากชั้นไหน", "คำอธิบาย", "ตัวอย่าง"], start=1):
@@ -359,6 +401,18 @@ else:
     style_header(ws, r, 6)
     ws.freeze_panes = f"C{r + 1}"
     r += 1
+
+    # เติมคอลัมน์ที่ไฟล์จริงมีแต่ DD ของระบบสกรีนยังไม่ได้อธิบาย
+    # จะได้ไม่ตกหล่นจากเอกสาร ทั้งที่มีอยู่ในไฟล์ที่ส่งมอบจริง
+    for c in UNDOCUMENTED:
+        d = DEFS.get(c)
+        screen_rows.append([
+            c,
+            d[0] if d else "",
+            (f"{d[3]} — {d[4]}" if d and d[4] else (d[3] if d else "")) or
+            "ยังไม่มีคำอธิบายใน DD ของระบบสกรีน",
+            "",
+        ])
 
     layer1 = set(EXCEL_COLUMNS)
     n_new = 0
@@ -495,9 +549,10 @@ r = title(ws, "สองระบบต่อกันยังไง — แล
 
 FLOW = [
     ("ชั้น 1", "Dealer MKP Platform", "ดึงคำสั่งซื้อจากหลังบ้าน 15 ร้าน",
-     "Excel 32 คอลัมน์ · schema กลาง", "output/<วันที่>/"),
-    ("ชั้น 2", "osuka-sku", "เติม osuka_sml_id / osuka_model_code + 29 คอลัมน์ประกอบ",
-     "Excel 63 คอลัมน์ ← ของส่งมอบ", "output/<วันที่>/screened/"),
+     f"Excel {N_LAYER1} คอลัมน์ · schema กลาง", "output/<วันที่>/"),
+    ("ชั้น 2", "osuka-sku",
+     f"เติม osuka_sml_id / osuka_model_code + {max(N_LAYER2 - N_LAYER1 - 2, 0)} คอลัมน์ประกอบ",
+     f"Excel {N_LAYER2} คอลัมน์ ← ของส่งมอบ", "output/<วันที่>/screened/"),
     ("ชั้น 3", "OSUKA Super Intelligence", "ฐานข้อมูลปลายทาง schema intel",
      "mp_orders_raw · mp_sku_mapping", "รอรายละเอียดการเชื่อมต่อ"),
 ]
@@ -534,7 +589,7 @@ RULES = [
      "ย้ายโฟลเดอร์เมื่อไหร่แค่เปลี่ยนค่านี้",
      "ฝัง path ตายตัวแล้วย้ายโฟลเดอร์ = พังเงียบ ๆ ตอนตี 8 ครึ่ง"),
     ("เอกสารอ่านจากต้นทาง ไม่คัดลอก",
-     "ชีท 'หลังสกรีน 63 คอลัมน์' อ่านคำอธิบายสดจาก DD ของ osuka-sku ตอนสร้างไฟล์นี้",
+     f"ชีท 'หลังสกรีน {N_LAYER2} คอลัมน์' อ่านคำอธิบายสดจาก DD ของ osuka-sku ตอนสร้างไฟล์นี้",
      "คัดลอกมาเก็บซ้ำ = วันหนึ่งเขาแก้ของเขา ของเราค้างอยู่กับข้อมูลเก่า "
      "กลายเป็น 2 แหล่งความจริงที่ขัดกันเอง"),
     ("ขั้นสกรีนล้มไม่ได้ทำให้รอบดึงล้ม",
@@ -564,9 +619,9 @@ ws.cell(row=r, column=1, value="⚠️ จุดเดียวที่ 2 ร�
     name=FONT, bold=True, size=12, color="C00000")
 r += 1
 COUPLE = [
-    "schema 32 คอลัมน์ของชั้นที่ 1 คือ 'สัญญา' ระหว่าง 2 ระบบ",
+    f"schema {N_LAYER1} คอลัมน์ของชั้นที่ 1 คือ 'สัญญา' ระหว่าง 2 ระบบ",
     "DD ของ osuka-sku เขียนไว้เองว่า \"จำนวนคอลัมน์ดิบเปลี่ยนตาม schema ของไฟล์ต้นทาง\"",
-    "แปลว่า ถ้าเราเพิ่ม/ลบ/เปลี่ยนชื่อคอลัมน์ในชั้นที่ 1 ไฟล์ 63 คอลัมน์จะเปลี่ยนตามทันที",
+    f"แปลว่า ถ้าเราเพิ่ม/ลบ/เปลี่ยนชื่อคอลัมน์ในชั้นที่ 1 ไฟล์ {N_LAYER2} คอลัมน์จะเปลี่ยนตามทันที",
     "ตัวสกรีนต้องการจริง ๆ แค่ 3 คอลัมน์: product_name · sku · variation",
     "→ ถ้าจะแก้ schema ชั้นที่ 1 ต้องแจ้งฝั่ง osuka-sku ก่อน โดยเฉพาะ 3 คอลัมน์นี้",
 ]
