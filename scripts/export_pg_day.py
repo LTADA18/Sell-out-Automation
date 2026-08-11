@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date, timedelta
@@ -49,10 +50,24 @@ I_QTY, I_REV = COLUMNS.index("quantity"), COLUMNS.index("revenue_thb")
 I_ORDERED, I_STATUS = COLUMNS.index("ordered_at"), COLUMNS.index("status_raw")
 
 
+# ยุบช่องว่างทุกชนิดที่ติดกันให้เหลือช่องว่างเดียว
+#
+# ⚠️ ทำไมต้องยุบ: sku / variation / product_name เป็น 3 ใน 5 คอลัมน์ของคีย์
+#    ไฟล์ Export ส่งค่าเดิมมาไม่เหมือนกันทุกครั้ง เจอทั้งอักขระขึ้นบรรทัดใหม่
+#    ฝังกลาง sku และช่องว่างซ้อน เช่น 'OCMC537-M1 +  OCMC2536'
+#    ถ้าไม่ยุบ ครั้งหน้าที่ต้นทางส่งมาต่างไปนิดเดียว คีย์จะเปลี่ยน แล้ว
+#    ON CONFLICT DO UPDATE จะหาแถวเดิมไม่เจอ กลายเป็นแถวใหม่ซ้อนเข้ามาแทน
+#
+# กฎนี้ต้องตรงกับฝั่งฐานเป๊ะ: btrim(regexp_replace(col, '\s+', ' ', 'g'))
+# \s ของ Python ครอบ \xa0 (non-breaking space) ด้วย ส่วนของ Postgres ไม่ครอบ
+# จึงแปลง \xa0 เป็นช่องว่างธรรมดาก่อน ทั้งสองฝั่งจะได้ผลลัพธ์เดียวกัน
+_WS = re.compile(r"\s+")
+
+
 def clean(v: object) -> str:
     if v is None:
         return ""
-    s = str(v).strip()
+    s = _WS.sub(" ", str(v).replace("\xa0", " ")).strip()
     return "" if s.lower() in BLANKS else s
 
 
