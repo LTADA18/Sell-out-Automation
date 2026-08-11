@@ -94,19 +94,40 @@ def test_shopee_status_with_trailing_text_still_maps(shop, settings):
     assert orders[0].order_status is OrderStatus.DELIVERED
 
 
-def test_shopee_does_not_map_financial_columns(shop, settings):
-    """เจ้าของงานสั่งไม่ให้ยุ่งกับข้อมูลการเงิน (2026-08-04)
+def test_shopee_maps_financial_columns(shop, settings):
+    """เจ้าของงานอนุญาตให้ดึงข้อมูลการเงินแล้ว (2026-08-11)
 
-    ไฟล์ Export ของ Shopee "มี" ค่าคอมมิชชั่น/Transaction Fee/ค่าบริการ อยู่จริง
-    เทสต์นี้กันไม่ให้มีใครเผลอ map เข้ามาโดยไม่ได้ขออนุญาตก่อน
+    เดิมเทสต์นี้กันไม่ให้ map เข้ามา ตอนนี้กลับด้าน — กันไม่ให้ใครเผลอถอดออก
     """
     s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
     adapter = build_adapter(s, settings)
 
-    for field in ("commission_fee", "transaction_fee", "service_fee", "settlement_amount"):
-        assert field not in adapter.map.fields, (
-            f"{field} ถูก map เข้ามาแล้ว — ต้องขออนุญาตเจ้าของงานก่อนแตะข้อมูลการเงิน"
-        )
+    for field in ("commission_fee", "transaction_fee", "service_fee"):
+        assert field in adapter.map.fields, f"{field} หายไปจาก column map"
+
+
+def test_shopee_settlement_amount_stays_unmapped(shop, settings):
+    """settlement_amount ต้องยังไม่ถูก map
+
+    รายงานออเดอร์ไม่มียอด settlement มาให้ ที่ใกล้ที่สุดคือ
+    "วันที่เงินเข้า Seller Balance" ซึ่งเป็นวันที่ ไม่ใช่ยอดเงิน
+    เทสต์นี้กันไม่ให้ใครเอาคอลัมน์อื่นมาใส่แทนโดยเดา (กฎเหล็กข้อ 1)
+    """
+    s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
+    adapter = build_adapter(s, settings)
+    assert "settlement_amount" not in adapter.map.fields
+
+
+def test_shopee_pii_columns_never_mapped(shop, settings):
+    """ชื่อและที่อยู่ห้ามไหลเข้ามา แต่จังหวัดต้องยังอยู่ (เจ้าของงานย้ำ 2026-08-11)"""
+    s = shop.model_copy(update={"adapter": "playwright", "platform": "shopee"})
+    adapter = build_adapter(s, settings)
+
+    mapped = {c for cols in adapter.map.fields.values() for c in cols}
+    for banned in ("ชื่อผู้รับ", "ที่อยู่ในการจัดส่ง", "หมายเลขโทรศัพท์",
+                   "รายละเอียดที่อยู่", "แขวง/ตำบล"):
+        assert banned not in mapped, f"{banned} เป็นข้อมูลส่วนบุคคล ห้าม map"
+    assert "province" in adapter.map.fields, "จังหวัดต้องยังดึงอยู่"
 
 
 def test_registered_platforms_have_column_maps(shop, settings):
