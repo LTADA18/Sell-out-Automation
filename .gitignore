@@ -36,3 +36,7 @@ output/_คลังข้อมูล/
 
 # log การโหลดขึ้น Postgres
 output/_pg_logs/
+
+# ไฟล์ไกด์ SKU และไฟล์ชั่วคราวของมัน
+output/_รีวิว_SKU/
+output/_sku_review_tmp/
