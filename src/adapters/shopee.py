@@ -788,6 +788,11 @@ class ShopeeAdapter(PlaywrightAdapter):
                 seller_discount=m.to_float(m.get(row, "seller_discount")),
                 platform_discount=m.to_float(m.get(row, "platform_discount")),
                 shipping_fee=m.to_float(m.get(row, "shipping_fee")),
+                # ── ค่าธรรมเนียม เปิดใช้ 2026-08-11 ──────────────
+                # เป็นค่าที่ Shopee หักจากผู้ขาย เก็บเป็นเลขบวกตามที่ไฟล์ให้มา
+                commission_fee=m.to_float(m.get(row, "commission_fee")),
+                transaction_fee=m.to_float(m.get(row, "transaction_fee")),
+                service_fee=m.to_float(m.get(row, "service_fee")),
                 shipping_carrier=m.get(row, "shipping_carrier"),
                 tracking_no=m.to_text(m.get(row, "tracking_no")),
                 total_amount=m.to_float(m.get(row, "total_amount")),
