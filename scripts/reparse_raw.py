@@ -74,6 +74,14 @@ def main() -> int:
                                 cfg.settings)
 
         # ยุบซ้ำด้วยคีย์เดียวกับปลายทาง — ไฟล์ดิบหลายไฟล์ทับช่วงกันได้
+        #
+        # ⚠️ ต้องแยก 2 กรณีนี้ให้ออก ไม่งั้นจำนวนชิ้นหาย
+        #   ซ้ำ "ในไฟล์เดียวกัน"  = Shopee ส่งสินค้าเดียวกันในออเดอร์เดียวมา 2 บรรทัดจริง
+        #                          เป็นของจริง 2 ชิ้น ต้องเก็บทั้งคู่
+        #   ซ้ำ "ข้ามไฟล์"        = บรรทัดเดิมถูกรายงานซ้ำในไฟล์รอบหลัง ต้องทับด้วยของใหม่
+        #
+        # จึงต่อลำดับที่พบในไฟล์นั้นเข้าไปในคีย์ ซ้ำในไฟล์เดียวกันจะได้คีย์คนละตัว
+        # เคยพลาดตรงนี้มาแล้ว ทำให้ 1-10 ส.ค. หายไป 91 แถว 165 ชิ้น (Shopee 5 ร้าน)
         seen: dict[tuple, object] = {}
         bad = 0
         for f in files:
@@ -83,8 +91,12 @@ def main() -> int:
                 bad += 1
                 print(f"      ⚠️ อ่านไม่ได้ {f.name[:52]} ({exc.__class__.__name__})")
                 continue
+            occ: dict[tuple, int] = {}
             for o in orders:
-                seen[(o.order_id, o.sku, o.variation, o.product_name)] = o
+                base = (o.order_id, o.sku, o.variation, o.product_name)
+                n = occ.get(base, 0)
+                occ[base] = n + 1
+                seen[(*base, n)] = o
 
         orders = apply_privacy(list(seen.values()), cfg.settings.privacy.include_pii)
 
