@@ -23,21 +23,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PSQL = r"C:\Program Files\PostgreSQL\18\bin\psql.exe"
 PGPASS = r"C:\Users\tada.p\Postgres\pgpass.conf"
 
-# คอลัมน์ที่เอาไปใช้จริง — ตัดคอลัมน์ภายในอย่าง line_id / loaded_at / source_file ออก
-COLUMNS = [
-    "ordered_at", "order_created_at", "paid_at",
-    "platform", "shop_id", "shop_name",
-    "order_id", "sku", "variation", "product_name",
-    "quantity", "item_price", "revenue_thb", "total_amount",
-    "status_raw", "order_status", "counts_as_sale",
-    "product_brand", "osuka_model_code", "osuka_sml_id",
-    "mapping_status", "match_method", "match_confidence", "needs_review",
-    "province", "payment_method", "shipping_carrier", "tracking_no",
-    "order_month",
-]
-TEXT_COLS = {"order_id", "sku", "tracking_no", "osuka_sml_id",
-             "osuka_model_code", "shop_id", "order_month"}
-NUM_COLS = {"quantity", "item_price", "revenue_thb", "total_amount"}
+# ⚠️ ไม่ฮาร์ดโค้ดรายชื่อคอลัมน์ — อ่านจากฐานตอนรัน
+#    เคยเลือกมาเองแค่ 29 คอลัมน์แล้วของหาย เจ้าของงานต้องการครบทุกคอลัมน์
+#    อ่านจาก information_schema แปลว่าถ้าฐานเพิ่มคอลัมน์ ไฟล์นี้ได้ตามอัตโนมัติ
+COLUMNS_SQL = """
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = 'intel' AND table_name = 'mp_order_line'
+ORDER BY ordinal_position
+"""
+
+# บังคับรูปแบบข้อความ — เลข 19 หลักของ TikTok ถ้าหลุดเป็น int จะโดนปัดหลักท้ายทิ้ง
+TEXT_COLS = {"order_id", "sku", "tracking_no", "osuka_sml_id", "osuka_model_code",
+             "shop_id", "order_month", "product_key", "parent_sku", "variation",
+             "buyer_username", "line_id"}
+NUM_COLS = {"quantity", "item_price", "item_discount", "seller_discount",
+            "platform_discount", "shipping_fee", "commission_fee", "transaction_fee",
+            "service_fee", "total_amount", "settlement_amount", "revenue_thb",
+            "accuracy_matching_pct", "order_mapping_accuracy_pct", "name_variants_seen",
+            "row_in_source"}
 
 
 def run_sql(sql: str) -> list[list[str]]:
@@ -73,6 +76,9 @@ def main() -> int:
     ap.add_argument("--to", dest="d_to", default="2026-08-10")
     args = ap.parse_args()
 
+    COLUMNS = [r[0] for r in run_sql(COLUMNS_SQL)]
+    print(f"คอลัมน์ในตาราง {len(COLUMNS)} คอลัมน์ — เอาครบทุกตัว")
+
     cols = ", ".join(COLUMNS)
     sql = (f"SELECT {cols} FROM intel.mp_order_line "
            f"WHERE ordered_at >= DATE '{args.d_from}' "
@@ -103,9 +109,26 @@ def main() -> int:
         c.alignment = Alignment(horizontal="center", wrap_text=True)
         ws.column_dimensions[get_column_letter(i)].width = \
             34 if name == "product_name" else (18 if "_at" in name else 15)
+    i_paid = COLUMNS.index("paid_at")
+    i_status = COLUMNS.index("order_status")
+    n_unpaid = n_nodata = 0
+
     for r_i, r in enumerate(rows, start=2):
         for c_i, name in enumerate(COLUMNS, start=1):
             v = r[c_i - 1]
+            # ── paid_at ที่ว่าง ต้องบอกให้ชัดว่าว่างเพราะอะไร ────────────
+            # ⚠️ ห้ามเติม Unpaid ลงทุกแถวที่ว่าง ผูกป้ายกับ order_status เท่านั้น
+            #    paid_at ว่างมี 94,824 แถว แต่ในนั้น 16,720 แถวส่งของไปแล้ว
+            #    lazada READY TO SHIP 11,688 แถว มูลค่า 22.15 ล้านบาท นับเป็นยอดขายอยู่
+            #    เพราะ export ของ lazada ไม่มีคอลัมน์เวลาชำระเงินมาแต่ต้นทาง
+            #    เขียนว่า Unpaid ตรงนั้น = บอกว่าลูกค้าไม่จ่ายทั้งที่จ่ายแล้ว
+            if name == "paid_at" and not v:
+                if r[i_status] == "UNPAID":
+                    v = "Unpaid"
+                    n_unpaid += 1
+                else:
+                    v = "ไม่มีข้อมูล"
+                    n_nodata += 1
             cell = ws.cell(row=r_i, column=c_i,
                            value=(num(v) if name in NUM_COLS else v))
             if name in TEXT_COLS:
@@ -166,6 +189,9 @@ def main() -> int:
     print(f"\n✅ {out.relative_to(PROJECT_ROOT)}  ({out.stat().st_size/1024/1024:,.1f} MB)")
     print(f"   {len(rows):,} บรรทัด · {orders:,} ออเดอร์ · {total_qty:,} ชิ้น")
     print(f"   ยอดขาย (นับเฉพาะ counts_as_sale) {total_sale:,.0f} บาท")
+    print(f"\n   paid_at ที่ว่าง เติมป้ายแล้ว")
+    print(f"     Unpaid       {n_unpaid:>7,} แถว  (สถานะเป็น UNPAID จริง)")
+    print(f"     ไม่มีข้อมูล    {n_nodata:>7,} แถว  (ส่งของแล้วแต่ต้นทางไม่ให้เวลาชำระมา)")
     print("\n   วันที่        บรรทัด    ออเดอร์      ยอดขาย")
     for d in sorted(by_day):
         v = by_day[d]
