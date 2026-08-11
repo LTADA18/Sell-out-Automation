@@ -54,6 +54,8 @@ fields:
   seller_discount:   [sellerDiscountTotal]
   platform_discount: [platformDiscountTotal]
   shipping_fee:      [shippingFee]
+  # เปิดใช้ 2026-08-11 — ส่วนลดจากการซื้อเป็นชุด เดิมตกหล่นไปเฉย ๆ
+  item_discount:     [bundleDiscount]
   shipping_carrier:  [shippingProvider]
   tracking_no:       [trackingCode]
   postcode:          [shippingPostCode]      # ใช้แปลงเป็นจังหวัด (ดู quirks ข้างล่าง)
@@ -116,8 +118,12 @@ quirks:
   #    → แปลงรหัสไปรษณีย์เป็นจังหวัดแทน (ตาราง data/th_postcode.csv)
   province_from_postcode: true
 
-  # 4) ไม่มีค่าคอมมิชชั่น / ค่าธรรมเนียม / ยอด settlement ในรายงานนี้
-  #    อยู่คนละที่: การเงิน > รายงานการชำระเงิน (Phase 5)
+  # 4) ⚠️ ยืนยันด้วยการเปิดไฟล์จริง 77 คอลัมน์ เมื่อ 2026-08-11
+  #    ไม่มีค่าคอมมิชชั่น / Transaction Fee / ค่าบริการ / ยอด settlement จริง ๆ
+  #    ต่างจาก Shopee ที่คอลัมน์พวกนี้ "มีอยู่ในไฟล์" แต่เดิมตั้งใจไม่ map
+  #    ของ Lazada คือไม่มีมาให้ตั้งแต่ต้นทาง จะ map ยังไงก็ไม่ได้
+  #    ยอดพวกนี้อยู่ที่ การเงิน > รายงานการชำระเงิน ซึ่งยังไม่ได้เปิดให้ระบบเข้า
+  #    เจ้าของงานเคยตกลงว่าจะ Export เองแล้วส่งไฟล์มา (กันกดผิดปุ่มโอนเงิน)
   no_fee_columns: true
 
   # 5) ไฟล์ไม่ประกาศ dimension → openpyxl read_only เห็นแค่ 1 คอลัมน์
