@@ -37,6 +37,21 @@ COLUMNS = [
     "match_method", "match_confidence", "needs_review",
 ]
 
+# ── คอลัมน์ที่มีก็เอา ไม่มีก็ปล่อยว่าง ─────────────────────────
+# แยกจาก COLUMNS เพราะไฟล์สกรีนรุ่นเก่ายังไม่มีคอลัมน์การเงินชุดใหม่
+# ถ้าใส่รวมใน COLUMNS สคริปต์จะ error แล้วโหลดข้อมูลย้อนหลังไม่ได้เลย
+#
+# ⚠️ เดิม CSV ที่ส่งเข้าฐานไม่มีคอลัมน์การเงินสักตัว แม้แต่ของ Shopee
+#    ที่เปิดใช้ไปแล้ว ข้อมูลจึงตกหล่นตั้งแต่ขั้นส่งเข้าฐาน ไม่ใช่ขั้นดึง
+OPTIONAL_COLUMNS = [
+    "item_discount", "seller_discount", "platform_discount",
+    "shipping_fee", "commission_fee", "transaction_fee", "service_fee",
+    "settlement_amount", "payment_method", "province",
+    # 5 ตัวใหม่ของ TikTok เปิดใช้ 2026-08-11
+    "item_subtotal_before_discount", "payment_discount", "tax_amount",
+    "shipping_fee_seller_discount", "shipping_fee_platform_discount",
+]
+
 # บันไดที่ mp_order_state() ในฐานรู้จักตอนนี้ (Shopee ล้วน)
 SHOPEE_PREFIX = "ผู้ซื้อได้รับสินค้าแล้ว"
 SHOPEE_KNOWN = {
@@ -45,9 +60,12 @@ SHOPEE_KNOWN = {
 }
 
 
-I_SKU, I_VAR, I_NAME = COLUMNS.index("sku"), COLUMNS.index("variation"), COLUMNS.index("product_name")
-I_QTY, I_REV = COLUMNS.index("quantity"), COLUMNS.index("revenue_thb")
-I_ORDERED, I_STATUS = COLUMNS.index("ordered_at"), COLUMNS.index("status_raw")
+ALL_COLUMNS = COLUMNS + OPTIONAL_COLUMNS
+
+I_SKU, I_VAR, I_NAME = (ALL_COLUMNS.index("sku"), ALL_COLUMNS.index("variation"),
+                        ALL_COLUMNS.index("product_name"))
+I_QTY, I_REV = ALL_COLUMNS.index("quantity"), ALL_COLUMNS.index("revenue_thb")
+I_ORDERED, I_STATUS = ALL_COLUMNS.index("ordered_at"), ALL_COLUMNS.index("status_raw")
 
 
 # ยุบช่องว่างทุกชนิดที่ติดกันให้เหลือช่องว่างเดียว
@@ -136,12 +154,15 @@ def main() -> int:
             if missing:
                 print(f"❌ {src.name} ขาดคอลัมน์ {missing}")
                 return 1
+            # คอลัมน์ทางเลือก: ไม่มีก็ไม่เป็นไร ปล่อยเป็นค่าว่าง ไม่ทำให้ทั้งรอบล้ม
             idx = {c: hdr.index(c) for c in COLUMNS}
+            idx.update({c: hdr.index(c) for c in OPTIONAL_COLUMNS if c in hdr})
 
             for r in it:
                 if not any(v is not None for v in r):
                     continue
-                vals = [clean(r[idx[c]]) for c in COLUMNS]
+                vals = [clean(r[idx[c]]) if c in idx else ""
+                        for c in ALL_COLUMNS]
                 vals[0] = vals[0].lower()
 
                 # กันไฟล์ปนวัน — เคยโดนมาแล้วตอนสกรีน ไฟล์ค้างทำยอดเฟ้อ 18%
@@ -168,7 +189,7 @@ def main() -> int:
 
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, quoting=csv.QUOTE_ALL, lineterminator="\n")
-        w.writerow(COLUMNS)
+        w.writerow(ALL_COLUMNS)
         for vals in staged.values():
             w.writerow(vals)
 

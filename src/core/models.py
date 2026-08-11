@@ -92,12 +92,17 @@ class Order(BaseModel):
 
     # ── เงิน: ระดับสินค้า ────────────────────────────────────
     item_price: float | None = None
+    item_subtotal_before_discount: float | None = None   # TikTok เท่านั้น
     item_discount: float | None = None
     seller_discount: float | None = None
     platform_discount: float | None = None
+    payment_discount: float | None = None                # ส่วนลดจากช่องทางชำระเงิน
+    tax_amount: float | None = None                      # ภาษีที่แพลตฟอร์มแจ้ง
 
     # ── ขนส่ง ────────────────────────────────────────────────
     shipping_fee: float | None = None
+    shipping_fee_seller_discount: float | None = None    # ร้านออกค่าส่งให้เท่าไหร่
+    shipping_fee_platform_discount: float | None = None  # แพลตฟอร์มออกให้เท่าไหร่
     shipping_carrier: str | None = None
     tracking_no: str | None = None
 
@@ -139,8 +144,10 @@ EXCEL_COLUMNS: tuple[str, ...] = (
     "order_created_at", "order_updated_at", "paid_at",
     "status_raw", "order_status", "payment_method",
     "sku", "product_name", "variation", "quantity",
-    "item_price", "item_discount", "seller_discount", "platform_discount",
-    "shipping_fee", "shipping_carrier", "tracking_no",
+    "item_price", "item_subtotal_before_discount", "item_discount",
+    "seller_discount", "platform_discount", "payment_discount", "tax_amount",
+    "shipping_fee", "shipping_fee_seller_discount", "shipping_fee_platform_discount",
+    "shipping_carrier", "tracking_no",
     "commission_fee", "transaction_fee", "service_fee",
     "total_amount", "settlement_amount",
     "buyer_username", "province",
@@ -153,8 +160,10 @@ TEXT_COLUMNS: frozenset[str] = frozenset({"order_id", "sku", "tracking_no"})
 
 # คอลัมน์ที่จัดรูปแบบเป็นเงิน
 MONEY_COLUMNS: frozenset[str] = frozenset({
-    "item_price", "item_discount", "seller_discount", "platform_discount",
-    "shipping_fee", "commission_fee", "transaction_fee", "service_fee",
+    "item_price", "item_subtotal_before_discount", "item_discount",
+    "seller_discount", "platform_discount", "payment_discount", "tax_amount",
+    "shipping_fee", "shipping_fee_seller_discount", "shipping_fee_platform_discount",
+    "commission_fee", "transaction_fee", "service_fee",
     "total_amount", "settlement_amount",
 })
 

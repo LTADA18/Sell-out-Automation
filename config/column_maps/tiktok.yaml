@@ -60,6 +60,15 @@ fields:
   platform_discount: ["SKU Platform Discount"]
   shipping_fee:      ["Shipping Fee After Discount"]
   shipping_fee_orig: ["Original Shipping Fee"]
+
+  # ── เปิดใช้ 2026-08-11 — เดิมมีในไฟล์แต่ไม่ได้ดึงมา ──────────
+  # ⚠️ ห้ามเอาไปบวกรวมกับ seller_discount / platform_discount
+  #    เป็นส่วนลดคนละก้อน บวกซ้ำแล้วยอดส่วนลดจะพองเป็นสองเท่า
+  item_subtotal_before_discount:  ["SKU Subtotal Before Discount"]
+  shipping_fee_seller_discount:   ["Shipping Fee Seller Discount"]
+  shipping_fee_platform_discount: ["Shipping Fee Platform Discount"]
+  payment_discount:               ["Payment platform discount"]
+  tax_amount:                     ["Taxes"]
   total_amount:      ["Order Amount"]
   refund_amount:     ["Order Refund Amount"]
   shipping_carrier:  ["Shipping Provider Name"]

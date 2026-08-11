@@ -339,6 +339,16 @@ class TiktokAdapter(PlaywrightAdapter):
                 seller_discount=m.to_float(m.get(row, "seller_discount")),
                 platform_discount=m.to_float(m.get(row, "platform_discount")),
                 shipping_fee=m.to_float(m.get(row, "shipping_fee")),
+                # ── เปิดใช้ 2026-08-11 ────────────────────────────
+                # ⚠️ แต่ละตัวเป็นส่วนลดคนละก้อน ห้ามบวกรวมกัน
+                item_subtotal_before_discount=m.to_float(
+                    m.get(row, "item_subtotal_before_discount")),
+                shipping_fee_seller_discount=m.to_float(
+                    m.get(row, "shipping_fee_seller_discount")),
+                shipping_fee_platform_discount=m.to_float(
+                    m.get(row, "shipping_fee_platform_discount")),
+                payment_discount=m.to_float(m.get(row, "payment_discount")),
+                tax_amount=m.to_float(m.get(row, "tax_amount")),
                 shipping_carrier=m.get(row, "shipping_carrier"),
                 tracking_no=m.to_text(m.get(row, "tracking_no")),
                 total_amount=m.to_float(m.get(row, "total_amount")),
@@ -346,7 +356,7 @@ class TiktokAdapter(PlaywrightAdapter):
                 province=m.get(row, "province"),          # TikTok ไม่ mask จังหวัด ใช้ได้เลย
                 cancel_reason=m.get(row, "cancel_reason"),
                 return_status=f"refund {refund}" if refund else None,
-                notes="ค่าธรรมเนียม/settlement อยู่ในเมนูการเงิน ยังไม่ได้ดึง",
+                notes="ค่าคอมมิชชั่น/settlement ไม่มีในรายงานออเดอร์ อยู่ในเมนูการเงิน",
                 fetched_at=datetime.now(),
             ))
         return orders
