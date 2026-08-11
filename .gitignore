@@ -30,3 +30,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+
+# คลังข้อมูล Excel — ใหญ่และสร้างใหม่ได้จาก output/
+output/_คลังข้อมูล/
