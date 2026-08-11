@@ -33,3 +33,6 @@ __pycache__/
 
 # คลังข้อมูล Excel — ใหญ่และสร้างใหม่ได้จาก output/
 output/_คลังข้อมูล/
+
+# log การโหลดขึ้น Postgres
+output/_pg_logs/
