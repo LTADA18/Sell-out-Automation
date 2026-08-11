@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from src.adapters.mock import MockAdapter
 from src.adapters.registry import build_adapter
@@ -155,9 +156,52 @@ def test_health_check_reports_broken_credential(shop, settings):
 # ไฟล์จริงมี PII จึง commit ลง repo ไม่ได้ — เทสจะข้ามถ้าไม่มีไฟล์บนเครื่อง
 
 DOWNLOADS = Path.home() / "Downloads"
+
+# ⚠️ เลือกไฟล์ด้วยชื่ออย่างเดียวไม่ได้ ต้องเปิดดูหัวตารางด้วย
+#    glob เดิม "????????????????????????????????.xlsx" แปลว่า "ชื่อยาว 32 ตัวอักษร"
+#    ซึ่งไปจับ "แบบฟอร์มใบเสนอสินค้า Homepro 2.1.xlsx" (ชื่อไทยยาว 32 พอดี) ติดมาด้วย
+#    แล้ว sorted() วางไฟล์ชื่อไทยไว้ท้ายสุด files[-1] จึงหยิบใบเสนอราคา Homepro
+#    มาทดสอบ Lazada เทสต์เลยล้มโดยที่ตัวแปลงไม่ได้พังเลย
+#
+# ⚠️ ลายเซ็นต้องเป็นคอลัมน์ที่ "เฉพาะ" แพลตฟอร์มนั้นมี
+#    เคยใส่ "หมายเลขคำสั่งซื้อ" เป็นลายเซ็น TikTok ซึ่งจริง ๆ เป็นคอลัมน์ของ Shopee
+#    ทำให้ไปหยิบไฟล์ Shopee มาทดสอบ TikTok แล้ว normalize ไม่ได้สักแถว
+_HEADER_SIGNATURE = {
+    "lazada": ("orderItemId", "orderNumber", "sellerSku"),
+    "tiktok": ("Order ID", "SKU ID", "Seller SKU"),
+}
+
+
+def _looks_like_export(path: Path, platform: str) -> bool:
+    """เปิดอ่านหัวตารางจริง ว่าเป็นไฟล์ Export ของแพลตฟอร์มนั้นไหม"""
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+        try:
+            ws = wb[wb.sheetnames[0]]
+            ws.reset_dimensions()          # ไฟล์ Lazada ไม่ประกาศ dimension
+            header = {str(c) for c in next(ws.iter_rows(values_only=True)) if c}
+        finally:
+            wb.close()
+    except Exception:
+        return False
+    return any(sig in header for sig in _HEADER_SIGNATURE[platform])
+
+
+def _real_exports(platform: str, pattern: str) -> list[Path]:
+    """ไฟล์ Export จริงของแพลตฟอร์มนั้น เรียงจากเก่าไปใหม่ตามเวลาแก้ไข
+
+    เรียงตามเวลาไม่ใช่ตามชื่อ เพราะชื่อไฟล์เป็นรหัสสุ่ม เรียงตามชื่อแล้ว
+    files[-1] ไม่ได้แปลว่าไฟล์ล่าสุด
+    """
+    found = [p for p in DOWNLOADS.glob(pattern) if _looks_like_export(p, platform)]
+    return sorted(found, key=lambda p: p.stat().st_mtime)
+
+
+# จำกัดด้วยชื่อไฟล์ก่อน แล้วค่อยเปิดตรวจหัวตาราง
+# ถ้าปล่อยเป็น *.xlsx จะต้องเปิดทุกไฟล์ใน Downloads เทสต์ช้าจาก 20 วินาทีเป็น 4 นาที
 REAL_FILES = {
-    "lazada": sorted(DOWNLOADS.glob("????????????????????????????????.xlsx")),
-    "tiktok": sorted(DOWNLOADS.glob("*คำสั่งซื้อ-*.xlsx")),
+    "lazada": _real_exports("lazada", "????????????????????????????????.xlsx"),
+    "tiktok": _real_exports("tiktok", "*คำสั่งซื้อ-*.xlsx"),
 }
 
 
