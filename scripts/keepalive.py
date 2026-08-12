@@ -28,6 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.adapters.registry import build_adapter          # noqa: E402
+from src.core import mailer                              # noqa: E402
 from src.core.browser_cleanup import close_stale_browsers  # noqa: E402
 from src.core.config import load_config                  # noqa: E402
 from src.core.logging_setup import get_logger, setup_logging  # noqa: E402
@@ -35,6 +36,52 @@ from src.core.models import AdapterError                 # noqa: E402
 from src.core.runner import AlreadyRunningError, run_lock  # noqa: E402
 
 log = get_logger()
+
+# ผู้รับอีเมลเตือน — ตัวเดียวกับที่รอบรายวันส่งรายงานไปหา
+DEFAULT_ALERT_TO = "Pitchaya.L@imaxpowertool.com"
+
+
+def send_login_alert(need_login: list[str], to: str, draft: bool = False) -> None:
+    """เตือนทางอีเมลว่ามีร้านต้องล็อกอินเอง
+
+    ⚠️ ทำไมต้องมี — ตัวตรวจเจอปัญหาได้ล่วงหน้าครึ่งวัน แต่เขียนลงล็อกที่ไม่มีใครอ่าน
+       2026-08-11 เวลา 20:00 keepalive เจอ 6 ร้านพังแล้วรายงานไว้ในล็อก
+       ไม่มีใครเห็น เช้า 2026-08-12 รอบดึงเลยตกไป 6 ร้านเหมือนเดิม
+       การตรวจเจอที่ไม่มีใครรู้ ไม่ต่างอะไรกับไม่ได้ตรวจ
+
+    ส่งไม่สำเร็จก็ไม่ทำให้ keepalive ล้ม — งานหลักคือต่ออายุ session
+    """
+    rows = "".join(
+        f"<tr><td style='padding:6px 14px;border:1px solid #ddd'>{sid}</td>"
+        f"<td style='padding:6px 14px;border:1px solid #ddd;font-family:Consolas'>"
+        f".\\.venv\\Scripts\\python.exe scripts\\login_save.py --shop {sid}</td></tr>"
+        for sid in need_login
+    )
+    html = (
+        f"<div style='font-family:Segoe UI,Tahoma'>"
+        f"<h3 style='color:#C00000'>ต้องล็อกอินใหม่ {len(need_login)} ร้าน</h3>"
+        f"<p>ต่ออายุ session อัตโนมัติไม่สำเร็จ ถ้าไม่ล็อกอินก่อนรอบถัดไป "
+        f"ร้านเหล่านี้จะดึงข้อมูลไม่ได้</p>"
+        f"<table style='border-collapse:collapse'>"
+        f"<tr><th style='padding:6px 14px;border:1px solid #ddd'>ร้าน</th>"
+        f"<th style='padding:6px 14px;border:1px solid #ddd'>คำสั่ง</th></tr>"
+        f"{rows}</table>"
+        f"<p style='color:#666;font-size:12px'>ตอนล็อกอิน ถ้า Chrome ถามว่าจะบันทึก"
+        f"รหัสผ่านไหม ให้กดบันทึก ครั้งหน้าระบบจะต่ออายุเองได้โดยไม่ต้องเรียกคน</p>"
+        f"<p style='color:#888;font-size:11px'>ส่งอัตโนมัติจาก keepalive · "
+        f"{datetime.now():%Y-%m-%d %H:%M}</p></div>"
+    )
+    try:
+        mailer.send(
+            subject=f"⚠️ ต้องล็อกอินใหม่ {len(need_login)} ร้าน — {', '.join(need_login)}",
+            html=html, to=[t.strip() for t in to.split(",") if t.strip()],
+            send_now=not draft,
+        )
+        print(f"  📧 ส่งอีเมลเตือนไปที่ {to} แล้ว")
+        log.info("keepalive_alert_sent", shops=need_login, to=to)
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  ⚠️ ส่งอีเมลเตือนไม่สำเร็จ: {type(exc).__name__}: {exc}")
+        log.warning("keepalive_alert_failed", err=str(exc)[:200])
 
 
 def session_age_hours(shop) -> float | None:
@@ -74,6 +121,12 @@ def main() -> int:
                     help="เวลารอบดึงรายวัน — ตัวนี้จะไม่รันช่วงใกล้เวลานั้น")
     ap.add_argument("--guard-min", type=int, default=45,
                     help="ห้ามรันภายในกี่นาทีก่อนรอบดึง (ค่าเริ่มต้น 45)")
+    ap.add_argument("--alert-to", default=DEFAULT_ALERT_TO,
+                    help="อีเมลที่จะเตือนเมื่อมีร้านต้องล็อกอินเอง คั่นหลายคนด้วย ,")
+    ap.add_argument("--no-alert", action="store_true",
+                    help="ไม่ต้องส่งอีเมลเตือน (ใช้ตอนทดสอบ)")
+    ap.add_argument("--draft-alert", action="store_true",
+                    help="เปิดหน้าต่างร่างแทนการส่งจริง ใช้ตรวจหน้าตาอีเมล")
     args = ap.parse_args()
 
     # ⚠️ กันชนกับรอบดึงรายวัน
@@ -153,6 +206,9 @@ def main() -> int:
         print(f"\n⚠️  ต้องล็อกอินเอง {len(need_login)} ร้าน: {', '.join(need_login)}")
         for sid in need_login:
             print(f"    .\\.venv\\Scripts\\python.exe scripts\\login_save.py --shop {sid}")
+        # ⚠️ พิมพ์ลงจอกับล็อกอย่างเดียวไม่พอ ไม่มีใครเปิดอ่าน — ต้องเด้งหาคน
+        if not args.no_alert:
+            send_login_alert(need_login, args.alert_to, draft=args.draft_alert)
     # ไม่สำเร็จ = ต้องมีคนล็อกอิน แต่ไม่ควรทำให้ตัวตั้งเวลาขึ้นแดงทุกวัน
     # จึงคืน 0 เสมอ แล้วให้ดูรายละเอียดใน log แทน
     return 0
