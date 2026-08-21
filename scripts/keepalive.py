@@ -33,6 +33,7 @@ from src.core.browser_cleanup import close_stale_browsers  # noqa: E402
 from src.core.config import load_config                  # noqa: E402
 from src.core.logging_setup import get_logger, setup_logging  # noqa: E402
 from src.core.models import AdapterError                 # noqa: E402
+from src.core.busy import busy_reason                      # noqa: E402
 from src.core.runner import AlreadyRunningError, run_lock  # noqa: E402
 
 log = get_logger()
@@ -174,6 +175,15 @@ def main() -> int:
 
     if not todo:
         print("\nไม่มีร้านที่ต้องต่ออายุ")
+        return 0
+
+    # ⚠️ ต้องเช็คก่อน close_stale_browsers() — ไม่ใช่หลัง
+    #    ถ้าปล่อยให้มันไล่ปิด Chrome ของงาน backfill ที่กำลังรัน cookie ในหน่วยความจำ
+    #    จะไม่ถูกเขียนลงดิสก์ การล็อกอินหายทั้งดุ้น แล้วต้องให้คนมานั่งล็อกอินใหม่
+    busy = busy_reason()
+    if busy:
+        print(f"มีงานยาวใช้เบราว์เซอร์อยู่ — ข้ามรอบนี้ (ไม่ใช่ความผิดพลาด)\n  {busy}")
+        log.info("keepalive_skipped_busy", reason=busy)
         return 0
 
     print(f"\nต้องต่ออายุ {len(todo)} ร้าน")

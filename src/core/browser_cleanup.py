@@ -39,11 +39,16 @@ def _ps(script: str, timeout: int = 90) -> str:
     return (out.stdout or "").strip()
 
 
-def _find_pids() -> list[int]:
-    """PID ของ Chrome ที่ใช้โปรไฟล์ของโปรเจกต์นี้"""
+def _find_pids(only_profile: str | None = None) -> list[int]:
+    """PID ของ Chrome ที่ใช้โปรไฟล์ของโปรเจกต์นี้
+
+    only_profile = ชื่อโฟลเดอร์โปรไฟล์ (เช่น "lazada_02") → แตะเฉพาะร้านนั้น
+    ไม่ใส่ = กวาดทุกโปรไฟล์ของโปรเจกต์ (ใช้กับการกวาดก่อนเริ่มรอบใหม่เท่านั้น)
+    """
     # เทียบด้วย path เต็มของโฟลเดอร์โปรไฟล์ ไม่ใช่คำว่า "profiles" ลอย ๆ
     # ไม่งั้นจะไปโดน Chrome ของโปรเจกต์อื่นที่บังเอิญมีคำนี้ใน command line
-    needle = str(PROFILES_DIR).replace("'", "''")
+    target = PROFILES_DIR / only_profile if only_profile else PROFILES_DIR
+    needle = str(target).replace("'", "''")
     script = (
         "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
         f"Where-Object {{ $_.CommandLine -like '*{needle}*' }} | "
@@ -56,17 +61,27 @@ def _find_pids() -> list[int]:
         return []
 
 
-def close_stale_browsers() -> int:
+def close_stale_browsers(only_profile: str | None = None) -> int:
     """ปิด Chrome ค้างของโปรเจกต์นี้ คืนจำนวนที่ปิดไป
 
     ห้ามโยน exception ออกไป — งานหลักคือดึงข้อมูล ถ้าเคลียร์ไม่ได้ก็ควรลองดึงต่อ
     ไม่ใช่ล้มทั้งรอบเพราะขั้นตอนเสริม
+
+    ⚠️ ใส่ only_profile ทุกครั้งที่รู้ว่าจะเปิดร้านไหน
+       ตัวนี้แยกไม่ออกว่า Chrome ตัวไหน "ค้างตายแล้ว" กับ "ของงานที่ยังทำอยู่"
+       กวาดทั้งโฟลเดอร์เมื่อไหร่ = ฆ่าเบราว์เซอร์ของงานขนานที่กำลังทำงานอยู่
+
+       เจอจริง 2026-08-18: backfill lazada_02 เปิด Chrome ไม่ติดเลยสั่งกวาด
+       แล้วไปฆ่า Chrome ของ backfill tiktok_06 ที่รันขนานอยู่ทิ้ง
+       tiktok_06 จึงล้ม 4 เดือนรวด (เม.ย./พ.ค./ก.ค./ส.ค.) ด้วย TargetClosedError
+       ทั้งที่ไม่มีอะไรผิดกับร้านนั้นเลย
     """
-    pids = _find_pids()
+    pids = _find_pids(only_profile)
     if not pids:
         return 0
 
-    log.info("chrome_stale_found", count=len(pids), pids=pids[:12])
+    log.info("chrome_stale_found", count=len(pids), pids=pids[:12],
+             profile=only_profile or "ทุกโปรไฟล์")
     ids = ",".join(str(p) for p in pids)
     try:
         # 1) ขอปิดสุภาพ แล้วรอให้เขียน cookie ลงดิสก์
@@ -83,7 +98,7 @@ def close_stale_browsers() -> int:
         log.warning("chrome_cleanup_failed", err=str(exc)[:120])
         return 0
 
-    left = _find_pids()
+    left = _find_pids(only_profile)
     closed = len(pids) - len(left)
     if left:
         log.warning("chrome_cleanup_partial", closed=closed, still_running=len(left))
