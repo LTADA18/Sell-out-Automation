@@ -35,9 +35,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.adapters.registry import build_adapter          # noqa: E402
 from src.adapters.shopee import SEL, _click_first        # noqa: E402
 from src.core.config import load_config                  # noqa: E402
+from src.core.busy import clear_busy, mark_busy          # noqa: E402
 from src.core.exporter import export_shop                # noqa: E402
 from src.core.logging_setup import setup_logging         # noqa: E402
-from src.core.models import AdapterError, Order          # noqa: E402
+from src.core.models import AdapterError, ErrorType, Order   # noqa: E402
+from src.core.naming import canonical_name               # noqa: E402
 
 SHOP_IDS = ["shopee_02", "shopee_04", "shopee_05", "shopee_06"]
 MONTHS = [(date(2026, m, 1),
@@ -103,12 +105,23 @@ def open_shop(adapter, want_name: str = ""):
     adapter._dismiss_onboarding(page)
 
     # กันติดป้ายผิดร้าน — บัญชีเดียวดูได้หลายร้าน ถ้าอยู่ผิดร้านไฟล์จะเป็นของอีกร้าน
+    #
+    # ⚠️ เทียบผ่าน shop.name_matches() ไม่ใช่เทียบกับ web_name ตรง ๆ
+    #    ร้านที่มีร้านเดียวต่อบัญชี หน้าเว็บคืน "ชื่อบัญชี" ไม่ใช่ชื่อร้าน
+    #    (shopee_09 -> uneno · shopee_10 -> diy.tools · shopee_11 -> jumboa_shop)
+    #    เทียบตรง ๆ แล้วบล็อกงานย้อนหลังทั้งก้อนทั้งที่อยู่ถูกร้าน
     if want_name:
         cur = adapter._current_shop_name(page)
-        if cur and cur.strip().lower() != want_name.strip().lower():
+        if cur and not adapter.shop.name_matches(cur):
+            # ⚠️ ลำดับอาร์กิวเมนต์คือ (error_type, message) ห้ามสลับ
+            #    ของเดิมส่ง message มาก่อนแล้วใส่ error_type เป็น keyword
+            #    ทำให้ TypeError ทับ error จริง แล้วรายงานว่า
+            #    "AdapterError.__init__() got multiple values" แทนที่จะบอกว่าอยู่ผิดร้าน
+            #    ปิดบังสาเหตุจริงของ shopee_09/10/11 ที่เก็บไฟล์ไม่ได้
             raise AdapterError(
-                f"อยู่ผิดร้าน — เปิดอยู่ {cur!r} แต่ต้องการ {want_name!r}",
-                error_type="WRONG_SHOP",
+                ErrorType.AUTH_REQUIRED,
+                f"อยู่ผิดร้าน — เปิดอยู่ {cur!r} แต่ต้องการ {want_name!r} "
+                f"(บัญชีเดียวดูได้หลายร้าน ต้องเลือกร้านให้ถูกก่อน)",
             )
     return page
 
@@ -117,6 +130,13 @@ def open_shop(adapter, want_name: str = ""):
 
 TH_MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
              "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม")
+
+# ⚠️ บางร้านตั้งหลังบ้านเป็นภาษาอังกฤษ หัวปฏิทินจะขึ้น 'July2026' ไม่ใช่ 'กรกฎาคม2026'
+#    ถ้าเทียบแต่ไทยจะอ่านหัวปฏิทินไม่ออก แล้วล้มตั้งแต่เดือนแรกทุกครั้ง
+#    (เจอจริง 2026-08-13 กับ shopee_10 ซึ่งหน้าเป็นอังกฤษ ล้มครบทั้ง 7 เดือน)
+#    รองรับทั้งชื่อเต็มและชื่อย่อ (July / Jul)
+EN_MONTHS = ("January", "February", "March", "April", "May", "June",
+             "July", "August", "September", "October", "November", "December")
 
 # ⚠️ หัวปฏิทินมีปุ่ม .eds-picker-header__prev "สองอัน" ในแผงเดียว class เหมือนกันเป๊ะ
 #      nth(0) = ลูกศรคู่ («) ย้อน 1 ปี
@@ -140,12 +160,20 @@ def panel_label(page, side: str) -> str:
 
 
 def parse_label(text: str) -> tuple[int, int] | None:
-    """'สิงหาคม2026' -> (2026, 8)"""
+    """'สิงหาคม2026' หรือ 'August2026' / 'Aug2026' -> (2026, 8)"""
+    clean = text.replace(" ", "")
     for i, name in enumerate(TH_MONTHS, 1):
-        if text.startswith(name):
-            tail = "".join(c for c in text[len(name):] if c.isdigit())
+        if clean.startswith(name):
+            tail = "".join(c for c in clean[len(name):] if c.isdigit())
             if tail:
                 return int(tail), i
+    low = clean.lower()
+    for i, name in enumerate(EN_MONTHS, 1):
+        for form in (name.lower(), name[:3].lower()):
+            if low.startswith(form):
+                tail = "".join(c for c in clean[len(form):] if c.isdigit())
+                if tail:
+                    return int(tail), i
     return None
 
 
@@ -225,12 +253,23 @@ def close_modal(page) -> None:
 
 def request_one(adapter, page, a: date, b: date, log_fn) -> None:
     close_modal(page)
+
+    # ⚠️ ต้องเคลียร์ของที่ลอยทับปุ่มก่อนกด — ใช้ selector เดียวกับรอบรายวันทุกอย่าง
+    #    แต่เดิมข้ามขั้นนี้ไป เลยกดไม่โดนแล้วรายงานว่า "หาปุ่มไม่เจอ"
+    #    ทั้งที่ปุ่มอยู่ตรงนั้น มีแค่ป้ายแนะนำการใช้งานบังอยู่
+    #    (shopee_10 ล้มครบทั้ง 7 เดือนด้วยสาเหตุนี้ ทั้งที่รอบรายวันของร้านเดียวกันผ่านตลอด)
+    adapter._clear_overlay_over(page, SEL["open_modal"][0])
     if not _click_first(page, SEL["open_modal"], 15000):
-        # กล่องอาจยังค้างจากรอบก่อน — ปิดแล้วลองอีกครั้งก่อนยอมแพ้
+        # คลิกไม่ผ่านมัก = มีของลอยทับ ไม่ใช่ปุ่มหาย — เคลียร์แล้วลองอีกครั้ง
         close_modal(page)
+        adapter._dismiss_onboarding(page)
+        state = adapter._clear_overlay_over(page, SEL["open_modal"][0])
         page.wait_for_timeout(1500)
         if not _click_first(page, SEL["open_modal"], 10000):
-            raise RuntimeError('หาปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่เจอ')
+            adapter._screenshot_on_error(page, "backfill_open_modal_blocked")
+            raise RuntimeError(
+                f'กดปุ่ม "ดาวน์โหลด" (เปิดกล่อง) ไม่ได้ — สถานะสิ่งที่ทับ: {state} '
+                f"— ดูภาพหน้าจอใน logs/screenshots/")
     page.wait_for_timeout(3000)
 
     field = page.locator(SEL["range_input"][0]).first
@@ -415,7 +454,14 @@ def phase_merge(cfg, st: dict) -> None:
     for shop_id in SHOP_IDS:
         s = cfg.shop(shop_id)
         adapter = build_adapter(s, cfg.settings)
-        merged: dict[str, Order] = {}
+        # ⚠️ คีย์กันซ้ำต้องครบ 5 ส่วน ห้ามย่อเหลือ order_id|sku เด็ดขาด
+        #    ย่อแล้วจะทิ้ง: ออเดอร์เดียว SKU เดียวแต่คนละตัวเลือก (variation)
+        #    เคยพลาดมาแล้วตอนโหลด Postgres — หายไป 1,319 บรรทัด / 971 ออเดอร์
+        #
+        #    และต้องมีตัวนับลำดับซ้ำ (occ) เพราะ Shopee ส่งสินค้าเดียวกันในออเดอร์
+        #    เดียวกันมาเป็น 2 บรรทัดได้จริง ถ้าไม่นับ บรรทัดหลังจะทับบรรทัดแรก
+        #    เคยทำให้หายไป 91 บรรทัด / 165 ชิ้น
+        merged: dict[tuple, Order] = {}
         used = 0
         for a, b in PERIODS:
             key = f"{shop_id}|{stamp(a, b)}"
@@ -425,8 +471,12 @@ def phase_merge(cfg, st: dict) -> None:
             path = PROJECT_ROOT / rel
             try:
                 rows = read_any(adapter, path)
+                occ: dict[tuple, int] = {}
                 for o in adapter.normalize(rows):
-                    merged[f"{o.order_id}|{o.sku}"] = o    # กันซ้ำข้ามเดือน
+                    base = (o.order_id, o.sku, o.variation, o.product_name)
+                    n = occ.get(base, 0)
+                    occ[base] = n + 1
+                    merged[(*base, n)] = o                 # กันซ้ำข้ามเดือน
                 used += 1
             except Exception as exc:                      # noqa: BLE001
                 print(f"   ⚠️ {shop_id} {a:%Y-%m} อ่านไม่ได้: {exc}")
@@ -437,7 +487,11 @@ def phase_merge(cfg, st: dict) -> None:
             continue
         path = export_shop(
             list(merged.values()),
-            shop_id=shop_id, platform=s.platform, shop_name=s.display_name,
+            # ⚠️ ต้องเป็นชื่อมาตรฐาน ไม่ใช่ display_name ที่เป็นชื่อดิบจากแพลตฟอร์ม
+            #    เคยพลาดมาแล้วใน reparse_raw.py — ได้ไฟล์ชื่อผิด 108 ไฟล์
+            #    ถ้าหลุดเข้าฐาน ร้านเดียวจะถูกหั่นเป็น 2 ชื่อ แล้วรายงานนับแยกกัน
+            shop_id=shop_id, platform=s.platform,
+            shop_name=canonical_name(shop_id, s.display_name),
             run_date="2026-01_ถึง_2026-07",
             date_from="2026-01-01", date_to="2026-07-31",
             output_dir=BASE, archive_dir=BASE / "_archive",
@@ -468,12 +522,17 @@ def main() -> int:
     BASE.mkdir(parents=True, exist_ok=True)
     st = load_state()
 
-    if args.phase in ("request", "all"):
-        phase_request(cfg, st)
-    if args.phase in ("collect", "all"):
-        phase_collect(cfg, st, args.rounds, args.wait)
-    if args.phase in ("merge", "all"):
-        phase_merge(cfg, st)
+    # ยกธงกัน KeepAlive เข้ามาไล่ปิด Chrome กลางคัน (ดู src/core/busy.py)
+    mark_busy(f"shopee_backfill phase={args.phase} shops={','.join(SHOP_IDS)}")
+    try:
+        if args.phase in ("request", "all"):
+            phase_request(cfg, st)
+        if args.phase in ("collect", "all"):
+            phase_collect(cfg, st, args.rounds, args.wait)
+        if args.phase in ("merge", "all"):
+            phase_merge(cfg, st)
+    finally:
+        clear_busy()
 
     # ⚠️ ต้องนับด้วย collected_in_scope ไม่ใช่ len(st["collected"])
     #    ของเก่าจากร้านอื่นทำให้ตัวเลขเกินเป้าจนดูเหมือนเสร็จ (เคยพิมพ์ "39/14")

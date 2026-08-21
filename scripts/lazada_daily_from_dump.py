@@ -36,19 +36,25 @@ def main() -> int:
     ap.add_argument("--from", dest="d_from", required=True)
     ap.add_argument("--to", dest="d_to", required=True)
     ap.add_argument("--dump", help="ระบุไฟล์ export เอง (ไม่ใส่ = เอาไฟล์ใหญ่สุดที่มี)")
+    ap.add_argument("--shop", default=SHOP, help="ร้านที่ไฟล์นี้เป็นของ")
+    # ⚠️ แตกรายวันได้ไฟล์เยอะ (ช่วง 8 เดือน = 229 ไฟล์ = สกรีน 229 รอบ)
+    #    โหมดนี้รวมเป็นไฟล์เดียวเหมือนที่ backfill_nonshopee ทำ สกรีนรอบเดียวจบ
+    ap.add_argument("--single", action="store_true",
+                    help="รวมทั้งช่วงเป็นไฟล์เดียว แทนการแตกรายวัน")
     args = ap.parse_args()
 
     d_from = date.fromisoformat(args.d_from)
     d_to = date.fromisoformat(args.d_to)
 
     cfg = load_config()
-    s = cfg.shop(SHOP)
+    shop_id = args.shop
+    s = cfg.shop(shop_id)
     adapter = build_adapter(s, cfg.settings)
 
     if args.dump:
         src = Path(args.dump)
     else:
-        dumps = PROJECT_ROOT / "data" / "raw" / "lazada" / SHOP / "files"
+        dumps = PROJECT_ROOT / "data" / "raw" / "lazada" / shop_id / "files"
         files = sorted(dumps.glob("*.xlsx"), key=lambda p: p.stat().st_size, reverse=True)
         if not files:
             print(f"❌ ไม่พบไฟล์ Export ใน {dumps}")
@@ -70,6 +76,20 @@ def main() -> int:
     out_dir = PROJECT_ROOT / cfg.settings.paths.output_dir
     arc_dir = PROJECT_ROOT / cfg.settings.paths.archive_dir
 
+    # ── โหมดรวมไฟล์เดียว ────────────────────────────────────
+    if args.single:
+        picked = [o for o in orders if (dd := day_of(o)) and d_from <= dd <= d_to]
+        picked = apply_privacy(picked, cfg.settings.privacy.include_pii)
+        base = PROJECT_ROOT / "output" / "_backfill_2026h1_all"
+        path = export_shop(
+            picked, shop_id=shop_id, platform=s.platform, shop_name=s.report_name,
+            run_date=f"{d_from:%Y-%m}_ถึง_{d_to:%Y-%m}",
+            date_from=d_from.isoformat(), date_to=d_to.isoformat(),
+            output_dir=base, archive_dir=base / "_archive",
+        )
+        print(f"✅ รวมเป็นไฟล์เดียว {len(picked):,} ออเดอร์ → {path}")
+        return 0
+
     total = 0
     day = d_from
     while day <= d_to:
@@ -79,7 +99,7 @@ def main() -> int:
         run_date = (day + timedelta(days=1)).isoformat()
         path = export_shop(
             picked,
-            shop_id=SHOP,
+            shop_id=shop_id,
             platform=s.platform,
             shop_name=s.report_name,
             run_date=run_date,

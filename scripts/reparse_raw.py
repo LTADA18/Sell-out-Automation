@@ -43,6 +43,10 @@ def main() -> int:
     ap.add_argument("--from", dest="d_from", required=True)
     ap.add_argument("--to", dest="d_to", required=True)
     ap.add_argument("--shop", help="ทำร้านเดียว ไม่ใส่ = ทุกร้านที่เปิดใช้")
+    ap.add_argument("--all-files", action="store_true",
+                    help="อ่านไฟล์ดิบทุกไฟล์ ไม่กรองตามวันที่แก้ไขไฟล์ "
+                         "(ใช้กับงานย้อนหลัง — ไฟล์ 7 เดือนถูกโหลดวันนี้ "
+                         "วันที่แก้ไขไฟล์จึงเป็นวันนี้ ไม่ใช่วันของข้อมูล)")
     args = ap.parse_args()
 
     d_from = date.fromisoformat(args.d_from)
@@ -64,8 +68,9 @@ def main() -> int:
         # เผื่อขอบ 2 วัน เพราะรอบรายวันดึงข้อมูลของเมื่อวาน
         lo = d_from - timedelta(days=1)
         hi = d_to + timedelta(days=2)
-        files = [p for p in sorted(shop_raw.glob("*.xlsx"))
-                 if lo <= date.fromtimestamp(p.stat().st_mtime) <= hi]
+        files = sorted(shop_raw.glob("*.xlsx")) if args.all_files else [
+            p for p in sorted(shop_raw.glob("*.xlsx"))
+            if lo <= date.fromtimestamp(p.stat().st_mtime) <= hi]
         if not files:
             print(f"  {shop.shop_id:<12} ไม่มีไฟล์ดิบในช่วงนี้ ข้าม")
             continue
