@@ -20,9 +20,13 @@ param(
     # (เครื่องเป็นโน้ตบุ๊ก เปิด 8 โมง รอบดึงจะเริ่มตอนล็อกอิน ไม่ใช่ตี 6
     #  ถ้าตั้งอีเมลตามนาฬิกาจะส่งตอนข้อมูลยังไม่ครบ)
     [switch]$Mail,
-    [string]$MailTo = "Pitchaya.L@imaxpowertool.com",
-    # สำเนาถึง — คั่นด้วย , (เพิ่ม 3 คนตามที่เจ้าของงานสั่ง 2026-08-06)
-    [string]$MailCc = "Natcha.S@imaxpowertool.com,Tanapoom.S@imaxpowertool.com,panupun.s@imaxpowertool.com,Narissa.W@imaxpowertool.com"
+    # ⚠️ ห้ามใส่รายชื่อผู้รับไว้ที่นี่ — send_report.ps1 เป็นเจ้าของรายชื่อที่เดียว
+    #    ของเดิมไฟล์นี้มีรายชื่อ CC ของตัวเอง 4 คน แยกจาก send_report ที่มี 20 คน
+    #    พอเจ้าของงานสั่งเพิ่มคนใหม่ 2026-08-13 แก้แค่ send_report ไฟล์เดียว
+    #    อีเมลรายวันจึงส่งถึงแค่ 5 คนมาตลอด โดยไม่มีใครรู้ (เจอ 2026-08-19)
+    #    ใส่ค่าที่นี่ได้เฉพาะเวลาจงใจส่งหาคนอื่นเป็นครั้งคราว ไม่ใช่รายชื่อประจำ
+    [string]$MailTo = "",
+    [string]$MailCc = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,7 +67,7 @@ if ($Date) { $cliArgs += @("--date", $Date) }
 if ($SkipIfDone) { $cliArgs += "--skip-if-done" }
 
 $started = Get-Date
-Write-Host "เริ่มรอบ $($started.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Cyan
+Write-Host "เริ่มรอบ $($started.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture))" -ForegroundColor Cyan
 
 & $py @cliArgs
 $code = $LASTEXITCODE
@@ -107,10 +111,13 @@ if (-not $SkipScreen) {
 # ครอบ try/catch เหมือน Dashboard: อีเมลไม่ออกไม่ควรทำให้ exit code ของรอบเพี้ยน
 if ($Mail) {
     try {
-        # --only-if-complete: เจ้าของงานสั่ง 2026-08-07 ว่าไม่ครบทุกร้านห้ามส่ง
-        # --skip-if-sent    : กันส่งซ้ำ ถ้าวันนั้นมีการส่งไปแล้ว (เช่นสั่งรันมือก่อน
-        #                     แล้วตัวตั้งเวลายิงตามอีกรอบ) ผู้รับ 5 คนจะได้ไม่ได้เมลซ้ำ
-        & $py -m src.cli notify --to $MailTo --cc $MailCc --only-if-complete --skip-if-sent
+        # เรียก send_report.ps1 แทนการยิง notify เอง — มันเป็นเจ้าของรายชื่อผู้รับ
+        # และมีด่านตรวจที่อยู่กับ Exchange ที่ notify ตรง ๆ ไม่มี
+        # -SkipIfSent กันส่งซ้ำ ถ้าวันนั้นส่งไปแล้ว (เช่นสั่งรันมือก่อน แล้ว task ยิงตาม)
+        $srArgs = @('-SkipIfSent')
+        if ($MailTo) { $srArgs += @('-To', $MailTo) }
+        if ($MailCc) { $srArgs += @('-Cc', $MailCc) }
+        & (Join-Path $PSScriptRoot 'send_report.ps1') @srArgs
     } catch {
         Write-Host "ส่งอีเมลไม่สำเร็จ (ไม่กระทบผลการดึง): $_" -ForegroundColor Yellow
     }

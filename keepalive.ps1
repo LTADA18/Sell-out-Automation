@@ -10,9 +10,12 @@ param(
     # ครอบ Shopee ด้วย ไม่ใช่แค่ TikTok — ร้าน Shopee ก็ session หมดอายุได้
     # (เพิ่ม shopee เมื่อ 2026-08-09 ตอนเพิ่มร้านใหม่ 3 ร้าน)
     #
-    # ⚠️ ไม่รวม Lazada โดยตั้งใจ — session ของ Lazada อยู่ได้แค่ ~85 นาที
-    #    ต่ออายุตอน 13:00 ก็ตายก่อนถึง 08:30 อยู่ดี ไม่มีประโยชน์
-    #    Lazada พึ่ง auto_relogin ตอนดึงจริงแทน ซึ่งทำงานได้มาตลอด
+    # ⚠️ ไม่รวม Lazada ในรอบนี้ — session ของ Lazada อยู่ได้แค่ ~85 นาที
+    #    ต่ออายุวันละ 3 ครั้ง (10:00/16:00/22:00) ก็ตายก่อนถึงรอบถัดไปอยู่ดี
+    #
+    #    Lazada แยกไปอยู่ task ของตัวเองที่รัน "ทุกชั่วโมง" แทน
+    #    (DealerMKP-KeepAlive-Lazada สร้าง 2026-08-13 ตามที่เจ้าของงานสั่ง)
+    #    ชั่วโมงละครั้งทำให้อายุ session ไม่มีวันแตะ 85 นาที
     [string]$Platform = "shopee,tiktok",
     # 0 = แตะทุกร้านทุกครั้ง ไม่สนว่า session เพิ่งต่อไปหรือยัง
     #
@@ -35,6 +38,7 @@ if (-not (Test-Path $py)) {
     exit 4
 }
 
-Write-Host "ต่ออายุ session $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
+# ⚠️ ต้องใช้ InvariantCulture — เครื่องตั้งภาษาไทย ปีจะออกมาเป็น พ.ศ.
+Write-Host "ต่ออายุ session $([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture))" -ForegroundColor Cyan
 & $py -u scripts\keepalive.py --platform $Platform --max-age $MaxAge
 exit 0

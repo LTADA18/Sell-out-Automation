@@ -7,7 +7,7 @@
 # กด Ctrl+C เพื่อหยุดดู
 
 param(
-    [string]$Date = (Get-Date -Format 'yyyyMMdd')
+    [string]$Date = [datetime]::Now.ToString('yyyyMMdd', [Globalization.CultureInfo]::InvariantCulture)
 )
 
 $ErrorActionPreference = "Stop"

@@ -15,8 +15,9 @@ $PSQL = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
 $env:PGPASSFILE       = 'C:\Users\tada.p\Postgres\pgpass.conf'
 $env:PGCLIENTENCODING = 'UTF8'
 
-if (-not $Date) { $Date = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd') }
-$runDate = ([datetime]$Date).AddDays(1).ToString('yyyy-MM-dd')
+$INV = [Globalization.CultureInfo]::InvariantCulture
+if (-not $Date) { $Date = [datetime]::Now.AddDays(-1).ToString('yyyy-MM-dd', $INV) }
+$runDate = [datetime]::ParseExact($Date,'yyyy-MM-dd',$INV).AddDays(1).ToString('yyyy-MM-dd', $INV)
 
 $fail = 0
 function Ok  ([string]$m) { Write-Output "  [ผ่าน]   $m" }
