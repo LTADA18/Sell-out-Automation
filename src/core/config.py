@@ -51,8 +51,20 @@ class ShopConfig(BaseModel):
     # web_shop_name : ชื่อร้านที่โชว์บนหน้าเลือกร้าน (ค่าว่าง = ใช้ display_name)
     #                 แยกไว้เพราะ display_name เป็นชื่อที่เราเรียกกันเอง
     #                 ส่วนชื่อบนเว็บต้องตรงเป๊ะถึงจะกดถูกแถว
+    # web_account_name : ชื่อ "บัญชี" ที่ Seller Centre โชว์มุมขวาบน
+    #
+    # ⚠️ ทำไมต้องมีแยกจาก web_shop_name
+    #    ร้านที่มีร้านเดียวต่อบัญชี Shopee จะไม่มีหน้าเลือกร้านคั่น
+    #    ตัวอ่านชื่อจึงตกไปหยิบ class 'account-name' ซึ่งเป็น "ชื่อบัญชี" ไม่ใช่ชื่อร้าน
+    #    เช่น shopee_10 โชว์ 'diy.tools' ทั้งที่ชื่อร้านคือ 'DIY tools ขายเครื่องมือช่าง'
+    #    ด่านกันติดป้ายผิดร้านจึงตีว่า "อยู่ผิดร้าน" แล้วบล็อกงานย้อนหลังทั้งก้อน
+    #
+    #    ต้องประกาศไว้ ไม่ใช่ปล่อยให้ผ่านทุกชื่อ — ถ้ายอมรับชื่ออะไรก็ได้
+    #    วันที่โปรไฟล์ล็อกอินผิดบัญชีจริง ไฟล์จะถูกติดป้ายผิดร้านโดยไม่มีอะไรเตือน
+    #    (เคยเกิดแล้วกับ tiktok_01 ที่ล็อกอินด้วยบัญชีของ tiktok_02)
     profile_key: str | None = None
     web_shop_name: str | None = None
+    web_account_name: str | None = None
 
     @property
     def profile_id(self) -> str:
@@ -61,6 +73,20 @@ class ShopConfig(BaseModel):
     @property
     def web_name(self) -> str:
         return self.web_shop_name or self.display_name
+
+    def name_matches(self, seen: str | None) -> bool:
+        """ชื่อที่อ่านได้จากหน้าเว็บ เป็นของร้านนี้จริงไหม
+
+        ยอมรับได้ 2 ค่าเท่านั้น: ชื่อร้าน (web_name) หรือชื่อบัญชี (web_account_name)
+        อ่านไม่ได้ (None) ให้ถือว่าไม่ผ่าน — คนเรียกเป็นคนตัดสินว่าจะปล่อยผ่านไหม
+        """
+        if not seen:
+            return False
+        s = seen.strip().lower()
+        ok = {self.web_name.strip().lower()}
+        if self.web_account_name:
+            ok.add(self.web_account_name.strip().lower())
+        return s in ok
 
     @property
     def report_name(self) -> str:

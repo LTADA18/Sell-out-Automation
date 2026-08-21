@@ -99,29 +99,82 @@ class Order(BaseModel):
     payment_discount: float | None = None                # ส่วนลดจากช่องทางชำระเงิน
     tax_amount: float | None = None                      # ภาษีที่แพลตฟอร์มแจ้ง
 
+    # ⚠️ ค่าเดียวในไฟล์ Shopee ที่เป็น "ยอดรายบรรทัดจริง" — ตัวอื่นเป็นค่าระดับออเดอร์
+    #    ยืนยันกับไฟล์จริง 2026-08-13: qty 2 x ราคาขาย 230 = ราคาขายสุทธิ 460
+    #    ใช้เป็นน้ำหนักเฉลี่ยยอดออเดอร์ลงรายบรรทัด (ดู export_pg_day.py)
+    net_price: float | None = None          # Shopee: ราคาขายสุทธิ (ทั้งบรรทัด ก่อนหักส่วนลด)
+    deal_price: float | None = None         # Shopee: ราคาขาย (ต่อชิ้น หลังลดหน้าร้าน)
+
+    # ── ส่วนลด Shopee แยกตามคนที่ออกเงินให้ (เปิดใช้ 2026-08-13) ──
+    # ⚠️ ห้ามบวกรวมกันเองแล้วยัดใส่ seller_discount / platform_discount
+    #    วัดจากไฟล์จริงแล้วแต่ละช่องเป็นอิสระ ไม่มีช่องไหนเป็นผลรวมของช่องอื่น
+    #    ("โค้ดส่วนลด" = 0 ทุกแถว ไม่ใช่ผลรวม) บวกเองเมื่อไหร่ = สร้างตัวเลขขึ้นเอง
+    seller_voucher: float | None = None          # โค้ดส่วนลดชำระโดยผู้ขาย
+    seller_coin_cashback: float | None = None    # โค้ด Coins Cashback ชำระโดยผู้ขาย
+    seller_bundle_discount: float | None = None  # ส่วนลด bundle deal ชำระโดยผู้ขาย
+    seller_tradein_bonus: float | None = None    # โบนัสเครื่องเก่าแลกใหม่จากผู้ขาย
+    platform_voucher: float | None = None        # โค้ดส่วนลดชำระโดย Shopee
+    platform_bundle_discount: float | None = None  # ส่วนลด bundle deal ชำระโดย Shopee
+    coin_discount: float | None = None           # ส่วนลดจากการใช้เหรียญ
+    tradein_discount: float | None = None        # ส่วนลดเครื่องเก่าแลกใหม่
+    tradein_bonus: float | None = None           # โบนัสส่วนลดเครื่องเก่าแลกใหม่
+    voucher_total: float | None = None           # โค้ดส่วนลด (ในไฟล์เรา = 0 ทุกแถว)
+
     # ── ขนส่ง ────────────────────────────────────────────────
     shipping_fee: float | None = None
     shipping_fee_seller_discount: float | None = None    # ร้านออกค่าส่งให้เท่าไหร่
     shipping_fee_platform_discount: float | None = None  # แพลตฟอร์มออกให้เท่าไหร่
+    estimated_shipping_fee: float | None = None          # ค่าจัดส่งโดยประมาณ
+    return_shipping_fee: float | None = None             # ค่าจัดส่งสินค้าคืน
     shipping_carrier: str | None = None
+    shipping_method: str | None = None                   # วิธีการจัดส่ง
     tracking_no: str | None = None
 
     # ── ค่าธรรมเนียม (อยู่คนละรายงานกับ order — ดู Phase 5) ──
     commission_fee: float | None = None
     transaction_fee: float | None = None
     service_fee: float | None = None
+    installation_fee_buyer: float | None = None   # ค่าติดตั้งที่ชำระโดยผู้ซื้อ
+    installation_fee_actual: float | None = None  # ค่าติดตั้งตามจริงจากผู้ให้บริการ
 
     # ── เงิน: ระดับออเดอร์ ───────────────────────────────────
-    total_amount: float | None = None       # ยอดที่ลูกค้าจ่าย
+    # ⚠️ total_amount ซ้ำอยู่ทุกบรรทัดของออเดอร์เดียวกัน ห้ามบวกข้ามบรรทัด
+    total_amount: float | None = None       # ยอดที่ลูกค้าจ่ายทั้งออเดอร์ (รวมค่าส่ง)
+    item_paid_by_buyer: float | None = None  # ราคาสินค้าที่ชำระโดยผู้ซื้อ (ไม่รวมค่าส่ง)
     settlement_amount: float | None = None  # ยอดที่ร้านได้รับจริง
 
     # ── ผู้ซื้อ (ถูก mask เมื่อ include_pii=false) ───────────
     buyer_username: str | None = None
     province: str | None = None
 
+    # ── เวลาเพิ่มเติมของ Shopee (เดิมถูกยุบทิ้งใน order_updated_at) ──
+    promised_ship_at: datetime | None = None  # วันที่คาดว่าจะทำการจัดส่งสินค้า
+    shipped_at: datetime | None = None        # เวลาส่งสินค้า
+    delivered_at: datetime | None = None      # วันที่จัดส่งสำเร็จ
+    completed_at: datetime | None = None      # เวลาที่ทำการสั่งซื้อสำเร็จ
+    cancelled_at: datetime | None = None      # วันที่คำสั่งซื้อถูกยกเลิก
+    settlement_date: datetime | None = None   # วันที่เงินเข้า Seller Balance
+
     # ── ยกเลิก/คืน ───────────────────────────────────────────
     cancel_reason: str | None = None
     return_status: str | None = None
+    returned_qty: float | None = None
+
+    # ── ธง/ประเภท ────────────────────────────────────────────
+    order_type: str | None = None            # ประเภทคำสั่งซื้อ
+    fulfilled_by_platform: str | None = None  # คำสั่งซื้อที่ดำเนินการโดย Shopee
+    owned_by_platform: str | None = None      # Shopee เป็นเจ้าของ
+    in_bundle_deal: str | None = None         # เข้าร่วมแคมเปญ bundle deal หรือไม่
+    hot_listing: str | None = None            # Hot Listing
+    tax_invoice_requested: str | None = None  # ผู้ซื้อร้องขอใบกำกับภาษี
+    tax_invoice_type: str | None = None       # ประเภทใบกำกับภาษี
+
+    # ── ที่อยู่ระดับพื้นที่ (ไม่ใช่ PII — ที่อยู่จริง/ชื่อ/เบอร์ ไม่ดึงมา) ──
+    parent_sku: str | None = None
+    district: str | None = None
+    postcode: str | None = None
+    country: str | None = None
+    seller_note: str | None = None       # บันทึกของ "ผู้ขาย" ไม่ใช่หมายเหตุผู้ซื้อ
 
     # ── meta ─────────────────────────────────────────────────
     notes: str | None = None            # เหตุผลที่บาง field ว่าง — ห้ามเดาค่าแทน
@@ -142,29 +195,51 @@ class Order(BaseModel):
 EXCEL_COLUMNS: tuple[str, ...] = (
     "order_id", "platform", "shop_id", "shop_name",
     "order_created_at", "order_updated_at", "paid_at",
+    "promised_ship_at", "shipped_at", "delivered_at", "completed_at",
+    "cancelled_at", "settlement_date",
     "status_raw", "order_status", "payment_method",
-    "sku", "product_name", "variation", "quantity",
-    "item_price", "item_subtotal_before_discount", "item_discount",
-    "seller_discount", "platform_discount", "payment_discount", "tax_amount",
+    "sku", "parent_sku", "product_name", "variation", "quantity", "returned_qty",
+    "item_price", "deal_price", "net_price",
+    "item_subtotal_before_discount", "item_discount",
+    "seller_discount", "seller_voucher", "seller_coin_cashback",
+    "seller_bundle_discount", "seller_tradein_bonus",
+    "platform_discount", "platform_voucher", "platform_bundle_discount",
+    "coin_discount", "tradein_discount", "tradein_bonus", "voucher_total",
+    "payment_discount", "tax_amount",
     "shipping_fee", "shipping_fee_seller_discount", "shipping_fee_platform_discount",
-    "shipping_carrier", "tracking_no",
+    "estimated_shipping_fee", "return_shipping_fee",
+    "shipping_carrier", "shipping_method", "tracking_no",
     "commission_fee", "transaction_fee", "service_fee",
-    "total_amount", "settlement_amount",
-    "buyer_username", "province",
+    "installation_fee_buyer", "installation_fee_actual",
+    "item_paid_by_buyer", "total_amount", "settlement_amount",
+    # postcode ไม่อยู่ในนี้ — privacy.py ลบทิ้งทุกรอบ ใส่ไปก็ว่างเปล่า
+    "buyer_username", "province", "district", "country",
+    "order_type", "fulfilled_by_platform", "owned_by_platform",
+    "in_bundle_deal", "hot_listing",
+    "tax_invoice_requested", "tax_invoice_type",
     "cancel_reason", "return_status",
-    "notes", "fetched_at",
+    "seller_note", "notes", "fetched_at",
 )
 
 # คอลัมน์ที่ต้องบังคับเป็น text ใน Excel ไม่งั้นเลขยาวกลายเป็น 1.23457E+18
-TEXT_COLUMNS: frozenset[str] = frozenset({"order_id", "sku", "tracking_no"})
+TEXT_COLUMNS: frozenset[str] = frozenset({
+    "order_id", "sku", "parent_sku", "tracking_no", "postcode",
+})
 
 # คอลัมน์ที่จัดรูปแบบเป็นเงิน
 MONEY_COLUMNS: frozenset[str] = frozenset({
-    "item_price", "item_subtotal_before_discount", "item_discount",
-    "seller_discount", "platform_discount", "payment_discount", "tax_amount",
+    "item_price", "deal_price", "net_price",
+    "item_subtotal_before_discount", "item_discount",
+    "seller_discount", "seller_voucher", "seller_coin_cashback",
+    "seller_bundle_discount", "seller_tradein_bonus",
+    "platform_discount", "platform_voucher", "platform_bundle_discount",
+    "coin_discount", "tradein_discount", "tradein_bonus", "voucher_total",
+    "payment_discount", "tax_amount",
     "shipping_fee", "shipping_fee_seller_discount", "shipping_fee_platform_discount",
+    "estimated_shipping_fee", "return_shipping_fee",
     "commission_fee", "transaction_fee", "service_fee",
-    "total_amount", "settlement_amount",
+    "installation_fee_buyer", "installation_fee_actual",
+    "item_paid_by_buyer", "total_amount", "settlement_amount",
 })
 
 

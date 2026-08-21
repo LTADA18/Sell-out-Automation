@@ -41,6 +41,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="วันที่ของรอบดึง (ไม่ใส่ = วันนี้)")
     ap.add_argument("--screener", help="ที่อยู่ของโปรเจกต์สกรีน")
+    ap.add_argument("--lane", default="",
+                    help="ชื่อสายสำหรับรันขนาน เช่น a / b / c "
+                         "(แยกโฟลเดอร์ input+output ของตัวสกรีนไม่ให้ทับกัน)")
+    ap.add_argument("--shop", default="",
+                    help="สกรีนเฉพาะร้านนี้ เช่น shopee_10 "
+                         "(ใช้เมื่อเพิ่มร้านทีหลัง ไม่ต้องสกรีนซ้ำทั้ง 16 ร้าน)")
     args = ap.parse_args()
 
     screener = Path(args.screener) if args.screener else SCREENER
@@ -54,6 +60,13 @@ def main() -> int:
         return 1
 
     raw = sorted(p for p in src_dir.glob("*.xlsx") if not p.name.startswith("~"))
+    if args.shop:
+        # ⚠️ กรองด้วย "_<shop_id>_" ไม่ใช่ substring ลอย ๆ
+        #    ไม่งั้น --shop shopee_1 จะไปโดน shopee_10 / shopee_11 ด้วย
+        raw = [p for p in raw if f"_{args.shop}_" in p.name]
+        if not raw:
+            print(f"·  ไม่มีไฟล์ของ {args.shop} ใน {src_dir.name} — ข้าม")
+            return 0
     if not raw:
         print(f"❌ ไม่มีไฟล์ Excel ใน {src_dir}")
         return 1
@@ -71,8 +84,14 @@ def main() -> int:
     #
     #    ใช้โฟลเดอร์ของเราเองแยกต่างหาก และล้างก่อนทุกครั้ง
     #    ได้ผลพลอยได้คือไม่ไปแตะไฟล์ของเขาเลยแม้แต่ไฟล์เดียว
-    inbox = screener / "input_daily"
-    outbox = screener / "output"
+    # ⚠️ รันขนานต้องแยกโฟลเดอร์ ห้ามใช้ input_daily/ ร่วมกัน
+    #    โค้ดข้างล่างล้างไฟล์เก่าในโฟลเดอร์ก่อนทุกครั้ง ถ้า 2 สายใช้โฟลเดอร์เดียวกัน
+    #    สายที่เริ่มทีหลังจะลบไฟล์ที่สายแรกกำลังสกรีนอยู่ ผลลัพธ์จะขาดหายแบบไม่มี error
+    #    และ output/ ก็ต้องแยก เพราะตัวสกรีนสรุป brand_summary รวมทุกไฟล์ในโฟลเดอร์
+    suffix = f"_{args.lane}" if args.lane else ""
+    inbox = screener / f"input_daily{suffix}"
+    outbox = screener / f"output{suffix}"
+    outbox.mkdir(parents=True, exist_ok=True)
     if inbox.exists():
         for old in inbox.glob("*.xlsx"):
             old.unlink()
@@ -89,7 +108,7 @@ def main() -> int:
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     res = subprocess.run(
         [sys.executable, "-u", str(match_py),
-         "--input", f"{inbox.name}/", "--out", "output/"],
+         "--input", f"{inbox.name}/", "--out", f"{outbox.name}/"],
         cwd=screener, capture_output=True, text=True,
         encoding="utf-8", errors="replace", env=env, timeout=3600,
     )
