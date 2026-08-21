@@ -233,8 +233,12 @@ def reminders(run_time: str, before_s: str) -> None:
               help="ถ้าส่งของวันนี้ไปแล้วให้ออกทันที (ใช้กับ task สำรอง)")
 @click.option("--only-if-complete", is_flag=True,
               help="ส่งเฉพาะเมื่อดึงครบทุกร้าน มีร้านไหน FAILED ไม่ส่ง")
-@click.option("--alert-to", "alert_to", default=mailer.ALERT_TO,
-              help="อีเมลที่จะเตือนเมื่อดึงไม่ครบ คั่นหลายคนด้วย ,")
+# ไม่ใส่ default ตรงนี้ — ค่าเริ่มต้นอยู่ใน config/recipients.yaml
+# ถ้าใส่ default ที่นี่ click จะอ่านไฟล์ตอน import ทำให้คำสั่งอื่นที่ไม่เกี่ยว
+# กับอีเมลเลย (run / health) พังตามไปด้วยเมื่อไฟล์รายชื่อหาย
+@click.option("--alert-to", "alert_to", default=None,
+              help="อีเมลที่จะเตือนเมื่อดึงไม่ครบ คั่นหลายคนด้วย , "
+                   "(ไม่ใส่ = ใช้กลุ่ม alert ใน config/recipients.yaml)")
 @click.option("--no-alert", is_flag=True,
               help="ไม่ต้องส่งเมลเตือนเมื่อดึงไม่ครบ (ใช้ตอนทดสอบ)")
 def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
@@ -270,12 +274,14 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
             elif marker.exists():
                 click.echo(f"   ส่งเมลเตือนของ {run_date} ไปแล้วเมื่อ "
                            f"{marker.read_text(encoding='utf-8').strip()}")
-            elif mailer.send_incomplete_alert(run_date, bad, len(rows),
-                                              to=alert_to, draft=draft):
+            elif mailer.send_incomplete_alert(
+                    run_date, bad, len(rows),
+                    to=alert_to or mailer._default_alert_to(), draft=draft):
                 marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                   encoding="utf-8")
-                click.echo(f"   📧 ส่งเมลเตือนไปที่ {alert_to} แล้ว")
+                click.echo("   📧 ส่งเมลเตือนไปที่ "
+                           f"{alert_to or mailer._default_alert_to()} แล้ว")
             else:
                 click.echo("   ⚠️ ส่งเมลเตือนไม่สำเร็จ — ดู Dashboard แทน")
             sys.exit(0)

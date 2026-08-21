@@ -38,8 +38,9 @@ from src.core.runner import AlreadyRunningError, run_lock  # noqa: E402
 
 log = get_logger()
 
-# ผู้รับอีเมลเตือน — ตัวเดียวกับที่รอบรายวันส่งรายงานไปหา
-DEFAULT_ALERT_TO = "Pitchaya.L@imaxpowertool.com"
+# ผู้รับอีเมลเตือน — อยู่ใน config/recipients.yaml กลุ่ม alert
+# ⚠️ อ่านตอนใช้จริง ไม่ใช่ตอน import เพราะสคริปต์นี้ทำงานหลักคือต่ออายุ session
+#    ซึ่งไม่ควรพังทั้งตัวเพียงเพราะไฟล์รายชื่ออีเมลหาย
 
 
 def send_login_alert(need_login: list[str], to: str, draft: bool = False) -> None:
@@ -122,8 +123,9 @@ def main() -> int:
                     help="เวลารอบดึงรายวัน — ตัวนี้จะไม่รันช่วงใกล้เวลานั้น")
     ap.add_argument("--guard-min", type=int, default=45,
                     help="ห้ามรันภายในกี่นาทีก่อนรอบดึง (ค่าเริ่มต้น 45)")
-    ap.add_argument("--alert-to", default=DEFAULT_ALERT_TO,
-                    help="อีเมลที่จะเตือนเมื่อมีร้านต้องล็อกอินเอง คั่นหลายคนด้วย ,")
+    ap.add_argument("--alert-to", default=None,
+                    help="อีเมลที่จะเตือนเมื่อมีร้านต้องล็อกอินเอง คั่นหลายคนด้วย , "
+                         "(ไม่ใส่ = ใช้กลุ่ม alert ใน config/recipients.yaml)")
     ap.add_argument("--no-alert", action="store_true",
                     help="ไม่ต้องส่งอีเมลเตือน (ใช้ตอนทดสอบ)")
     ap.add_argument("--draft-alert", action="store_true",
@@ -218,7 +220,19 @@ def main() -> int:
             print(f"    .\\.venv\\Scripts\\python.exe scripts\\login_save.py --shop {sid}")
         # ⚠️ พิมพ์ลงจอกับล็อกอย่างเดียวไม่พอ ไม่มีใครเปิดอ่าน — ต้องเด้งหาคน
         if not args.no_alert:
-            send_login_alert(need_login, args.alert_to, draft=args.draft_alert)
+            to = args.alert_to
+            if not to:
+                from src.core.recipients import RecipientsError, alert_to as _alert_to
+                try:
+                    to = ",".join(_alert_to())
+                except RecipientsError as exc:
+                    # งานหลัก (ต่ออายุ session) ทำเสร็จไปแล้ว ตัวเตือนพัง
+                    # ไม่ควรลากให้ทั้งรอบขึ้นแดง แต่ต้องดังพอให้เห็นใน log
+                    log.error("alert_recipients_missing", err=str(exc)[:200])
+                    print(f"\n⚠️  ส่งเมลเตือนไม่ได้ — {exc}")
+                    to = ""
+            if to:
+                send_login_alert(need_login, to, draft=args.draft_alert)
     # ไม่สำเร็จ = ต้องมีคนล็อกอิน แต่ไม่ควรทำให้ตัวตั้งเวลาขึ้นแดงทุกวัน
     # จึงคืน 0 เสมอ แล้วให้ดูรายละเอียดใน log แทน
     return 0

@@ -40,3 +40,8 @@ output/_pg_logs/
 # ไฟล์ไกด์ SKU และไฟล์ชั่วคราวของมัน
 output/_รีวิว_SKU/
 output/_sku_review_tmp/
+
+# ── รายชื่ออีเมลผู้รับ ─────────────────────────────────────────
+# เป็นอีเมลของคนอื่น ไม่ใช่ของเรา จึงไม่ควรขึ้น git
+# ตัวอย่างที่ไม่มีที่อยู่จริงคือ config/recipients.example.yaml ซึ่ง commit ได้
+config/recipients.yaml

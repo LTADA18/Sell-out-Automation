@@ -56,9 +56,15 @@ def read_rows(db_path: Path, run_date: str | None = None) -> tuple[str, list[dic
 TH_MONTH_ABBR = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
                  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
 
-# คนที่ต้องรู้เมื่อระบบดึงไม่ครบ — คนละชุดกับผู้รับรายงานยอด 21 คน
+# คนที่ต้องรู้เมื่อระบบดึงไม่ครบ — คนละชุดกับผู้รับรายงานยอด
 # เตือนคือเรื่องของคนที่ลงมือแก้ ไม่ใช่เรื่องของทุกคนที่ดูยอด
-ALERT_TO = "Pitchaya.L@imaxpowertool.com"
+#
+# ⚠️ อ่านตอนเรียกใช้ ไม่ใช่ตอน import — ถ้าอ่านตอน import แล้วไฟล์รายชื่อหาย
+#    โมดูลนี้จะ import ไม่ผ่าน ลากให้ src.cli ทั้งตัวใช้ไม่ได้ ทั้งที่คำสั่ง
+#    อื่นอย่าง run/health ไม่ได้เกี่ยวกับอีเมลเลย
+def _default_alert_to() -> str:
+    from src.core.recipients import alert_to
+    return ",".join(alert_to())
 
 # error_type ที่ยิงซ้ำก็ไม่ผ่าน ต้องมีคนไปล็อกอินเอง (กฎเหล็กข้อ 5)
 NEEDS_HUMAN = ("AUTH_EXPIRED", "AUTH_REQUIRED", "NO_PERMISSION")
@@ -121,7 +127,7 @@ def _prev_day(run_date: str) -> str:
 
 
 def send_incomplete_alert(run_date: str, bad: list[dict], total: int,
-                          to: str = ALERT_TO, draft: bool = False) -> bool:
+                          to: str | None = None, draft: bool = False) -> bool:
     """เตือนว่ารอบดึงไม่ครบ — คืน True ถ้าส่งออกไปแล้ว
 
     ⚠️ ทำไมต้องมี — ด่าน --only-if-complete หยุดการส่งรายงานแล้วออกด้วย exit 0
@@ -133,6 +139,8 @@ def send_incomplete_alert(run_date: str, bad: list[dict], total: int,
     """
     shops = ", ".join(r.get("shop_id", "") for r in bad)
     try:
+        if to is None:
+            to = _default_alert_to()
         send(subject=f"⚠️ ดึงยอดไม่ครบ {run_date} — ล้ม {len(bad)} ร้าน ({shops})",
              html=build_incomplete_html(run_date, bad, total),
              to=[t.strip() for t in to.split(",") if t.strip()],

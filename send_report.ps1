@@ -18,47 +18,21 @@
 # แยกจาก run_daily.ps1 เพราะรอบดึงจบตี 6 แต่คนเข้างาน 8 โมง
 # และเผื่อรอบตี 6 มี retry ยืดเวลาออกไป กว่าจะถึง 8 โมงก็เสร็จแน่นอนแล้ว
 #
-# exit code: 0 = ส่งแล้ว, 1 = ส่งไม่สำเร็จ, 4 = ไม่พบ .venv, 5 = ใส่วันที่ขัดกัน
+# exit code: 0 = ส่งแล้ว, 1 = ส่งไม่สำเร็จ, 4 = ไม่พบ .venv, 5 = ใส่วันที่ขัดกัน,
+#            6 = อ่าน config\recipients.yaml ไม่ได้ (ไม่ส่งให้ใครทั้งนั้น)
 
 param(
     # วันที่ "รัน" — ข้อมูลที่ได้คือของเมื่อวานของวันนี้
     [string]$Date,
     # วันของ "ข้อมูล" ตรง ๆ — ปลอดภัยกว่า ใช้ตัวนี้เวลาสั่งเอง
     [string]$DataDate,
-    [string]$To = "Pitchaya.L@imaxpowertool.com",
-    # สำเนาถึง — คั่นด้วย , (เพิ่ม 3 คนตามที่เจ้าของงานสั่ง 2026-08-06)
-    #
-    # เพิ่มอีก 16 คนตามที่เจ้าของงานสั่ง 2026-08-13 (ส่งมา 17 รายชื่อ
-    # แต่ Narissa.W มีอยู่ในรายการเดิมแล้ว จึงไม่ซ้ำ)
-    #
-    # ⚠️ รายการที่เจ้าของงานส่งมาพิมพ์ตก @ ไป 1 ตัว ("Narissa.Wimaxpowertool.com")
-    #    ไม่ได้เดาเอง — ที่อยู่เต็มตัวนี้อยู่ในรายการเดิมของไฟล์นี้อยู่แล้ว
-    [string]$Cc = @(
-        "Natcha.S@imaxpowertool.com"
-        "Tanapoom.S@imaxpowertool.com"
-        "panupun.s@imaxpowertool.com"
-        "Narissa.W@imaxpowertool.com"
-        "kasamon.p@imaxpowertool.com"
-        "Thongchai.S@imaxpowertool.com"
-        "ketwarang.k@imaxpowertool.com"
-        "nantana.j@imaxpowertool.com"
-        "rosnalin.W@imaxpowertool.com"
-        "napatsorn.p@imaxpowertool.com"
-        "anansit.s@imaxpowertool.com"
-        "worapon.t@imaxpowertool.com"
-        "wassana.S@imaxpowertool.com"
-        "Thapanapat.b@imaxpowertool.com"
-        "Aitthiphon.g@imaxpowertool.com"
-        # ⚠️ ไม่มี .p — เจ้าของงานยืนยันกับเจ้าตัวโดยตรงแล้ว 2026-08-14
-        #    รายการที่ส่งมาตอนแรกเขียนว่า saksri.p@ ซึ่งส่งไม่ถึง
-        #    Exchange แปลงตัวนี้ได้เป็น "ศักดิ์ศรี พลเฉลิมฤทธิ์" แผนก Sales Dealer Offline
-        #    ส่วนตัวที่มี .p แปลงไม่ได้ (ระบบตีเป็นที่อยู่ภายนอก) จึงไม่ใช่ตัวที่ใช้งาน
-        "saksri@imaxpowertool.com"
-        "nuchaleporn.s@imaxpowertool.com"
-        "outsource_imax01@imaxpowertool.com"
-        "bussaba.m@imaxpowertool.com"
-        "waranyoo.p@imaxpowertool.com"
-    ) -join ",",
+    # ⚠️ ห้ามใส่ที่อยู่จริงเป็นค่าเริ่มต้นที่นี่
+    #    รายชื่อทั้งหมดอยู่ใน config\recipients.yaml ซึ่งอยู่ใน .gitignore
+    #    เพราะเป็นอีเมลของคนอื่น ไม่ควรขึ้น git ให้ใครที่เข้าถึง repo อ่านได้
+    #    ปล่อยว่างไว้ = ไปอ่านจากไฟล์นั้น (ดูด่านโหลดรายชื่อข้างล่าง)
+    #    ใส่ค่าที่นี่ได้เฉพาะเวลาจงใจส่งหาคนอื่นเป็นครั้งคราว
+    [string]$To = "",
+    [string]$Cc = "",
     [switch]$NoExcel,
     [switch]$Draft,
     # กันส่งซ้ำ — ถ้ารอบดึงส่งอีเมลของวันนี้ไปแล้ว ให้ออกทันที
@@ -112,14 +86,40 @@ if (-not (Test-Path $py)) {
     exit 4
 }
 
+# ---- ด่าน: โหลดรายชื่อผู้รับจาก config\recipients.yaml ----
+#
+# PowerShell 5.1 ไม่มีตัวอ่าน YAML ในตัว จึงเรียกผ่าน python ที่มีอยู่แล้ว
+# ข้อดีคือรายชื่ออยู่ไฟล์เดียวรูปแบบเดียวกับ config อื่นของโปรเจกต์
+#
+# ⚠️ อ่านไม่ได้ = หยุดเลย ห้ามส่งต่อด้วยรายชื่อว่าง
+#    อีเมลที่ "ส่งสำเร็จ" แต่ไม่ถึงใครเลย ไม่มีสัญญาณอะไรบอกว่าผิด
+#    แย่กว่าส่งไม่ออกเสียอีก (กฎเหล็กข้อ 1 — ไม่มีข้อมูลห้ามเดาแทน)
+function LoadRecipients([string]$group, [string]$field) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $py -m src.core.recipients --group $group --field $field 2>&1
+        $rc  = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    if ($rc -ne 0) {
+        Write-Host "อ่านรายชื่อผู้รับไม่ได้ (กลุ่ม $group/$field)" -ForegroundColor Red
+        Write-Host ($out -join "`n") -ForegroundColor Red
+        exit 6
+    }
+    return ($out | Where-Object { $_ -is [string] }) -join ""
+}
+
+if (-not $To) { $To = LoadRecipients 'report' 'to' }
+if (-not $Cc) { $Cc = LoadRecipients 'report' 'cc' }
+
 # ---- ด่าน: ที่อยู่ผู้รับต้องมีตัวตนจริงใน Exchange ทุกตัว ----
 #
 # ⚠️ ทำไมต้องมี (เจอจริง 2026-08-14)
-#    รายชื่อ 17 คนที่ได้มามีพิมพ์ผิด 2 จุดโดยไม่มีใครรู้:
-#      Narissa.Wimaxpowertool.com   ตก @ ไป (จับได้เพราะที่อยู่เต็มอยู่ในไฟล์นี้แล้ว)
-#      saksri.p@imaxpowertool.com   ไม่มีตัวตนในองค์กร ที่ถูกคือ saksri@
+#    รายชื่อ 17 คนที่ได้มามีพิมพ์ผิด 2 จุดโดยไม่มีใครรู้ — ตัวหนึ่งตก @ ไป
+#    อีกตัวมีจุดเกินมาหนึ่งจุดจนกลายเป็นที่อยู่ที่ไม่มีตัวตนในองค์กร
 #    ตัวหลังส่งออกไป "สำเร็จ" ทุกวันโดยไม่มีข้อความตีกลับเลยแม้แต่ฉบับเดียว
 #    กว่าจะรู้ก็ต่อเมื่อคนปลายทางทักมาเองว่าไม่ได้รับ
+#    (รายละเอียดว่าตัวไหนผิดยังไง อยู่ในคอมเมนต์ของ config\recipients.yaml)
 #
 #    Exchange แปลงที่อยู่ในองค์กรเป็นชื่อคนได้ ถ้าแปลงไม่ได้แปลว่าไม่มีคนนั้นอยู่จริง
 #    ตรวจก่อนส่งจึงจับได้ทันทีแทนที่จะเงียบไปเป็นสัปดาห์
