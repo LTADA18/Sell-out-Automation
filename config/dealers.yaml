@@ -1,0 +1,80 @@
+# จับคู่ร้านในระบบ กับ dealer group / AR code ที่ทีมใช้
+#
+# ทีมส่งตารางมา 2026-08-13 มี 18 dealer group
+# ระบบเราเก็บข้อมูลอยู่ 16 ร้าน ซึ่งครอบคลุมแค่บางส่วนของ 18 กลุ่มนั้น
+#
+# ⚠️ รวมยอดด้วย shop_id เสมอ ห้ามรวมด้วยชื่อร้าน
+#    ร้านเดียวกันมีหลายชื่อในฐาน เพราะข้อมูล 7 เดือนแรกโหลดด้วยชื่อดิบจากแพลตฟอร์ม
+
+dealers:
+  - ar_code: AR-0537-1
+    group: TNLTOOLSTORE
+    juristic: บริษัท ทูลส์ พาร์ทเนอร์ จำกัด
+    # ทีมแยกเป็น 2 แถว (Toolspartner / TNLTOOLSTORE) แต่ AR code กับนิติบุคคลเดียวกัน
+    # จึงถือเป็น dealer เดียว ตรงกับชื่อมาตรฐานที่เจ้าของงานกำหนดไว้แล้ว
+    shops: [shopee_03, shopee_08]
+
+  - ar_code: AR-0402
+    group: เอกสตีล
+    juristic: บริษัท เอกสตีล สี่แยกพนพงษ์ จำกัด
+    shops: [shopee_06, lazada_01]
+
+  - ar_code: AR-0113
+    group: toolsdee
+    juristic: บริษัท เบสท์ พาวเวอร์ ทูลส์ จำกัด
+    shops: [tiktok_02]
+
+  - ar_code: AR-0906
+    group: ร้อยอันพันอย่าง
+    juristic: บริษัท ร้อยอันพันอย่าง ฮาร์ดแวร์ จำกัด (สำนักงานใหญ่)
+    shops: [tiktok_04]
+
+  - ar_code: AR-0542
+    group: ฝ้ายการช่าง
+    juristic: บริษัท ฝ้ายการช่าง จำกัด
+    shops: [tiktok_03]
+
+  - ar_code: AR-0215
+    group: Smarttooltech
+    juristic: บริษัท สมาร์ท ทูลเทค จำกัด
+    shops: [shopee_02]
+
+  - ar_code: AR-0078
+    group: PowerS
+    juristic: บริษัท พาวเวอร์.เอส.มอเตอร์ ทูลส์ จำกัด
+    shops: [shopee_04, tiktok_01]
+
+  - ar_code: AR-0258
+    group: เฮียคิมคลองถม
+    juristic: น.ส.ฐิยาพร เพชรรัศมีพราว
+    shops: [shopee_01]
+
+  - ar_code: AR-0932-1
+    group: เฮียเก๋า Uneno
+    juristic: บริษัท ไอ.เอ็น.เอ็น แมชชีนทูลส์ จำกัด
+    shops: [shopee_05, tiktok_05]
+
+  - ar_code: AR-0214
+    group: นาดา Uneno
+    juristic: บริษัท นาดา อินเตอร์ กรุ๊ป จำกัด
+    shops: [shopee_09]
+
+  - ar_code: AR-0266-1
+    group: DIY Tool
+    juristic: บริษัท สหพานิช 2547 จำกัด
+    # เจ้าของงานยืนยัน 2026-08-13 ว่าแยกออกจากนาดา คนละนิติบุคคล
+    shops: [shopee_10]
+
+  - ar_code: AR-0416
+    group: JumboA
+    juristic: บริษัท จัมโบ้ เอ อินดัสทรี จำกัด
+    shops: [shopee_11]
+
+# dealer group ที่ทีมมีแต่ระบบเรายังไม่ได้เก็บข้อมูลร้าน
+# ไม่ใช่ข้อมูลหาย แต่เป็นร้านที่ยังไม่ได้เปิดให้ระบบดึง
+no_shop_yet:
+  - { ar_code: AR-0434, group: ยงเฮ้าส์ (3 shops) }
+  - { ar_code: AR-0244, group: นนท์ทูลส์ }
+  - { ar_code: AR-0867, group: missmeaban / bear electric / misko / deer / wolf / mrporban / prachuap outdoor / yaiwan }
+  - { ar_code: AR-998,  group: ต.ธนา }
+  - { ar_code: AR-1088, group: vspsupplyl (VSP) }

@@ -40,8 +40,9 @@ shops:
     adapter: playwright
     display_name: "TNLTOOLSTORE"
     account_key: LAZADA_02
-    enabled: false
-    skip_reason: "รอเจ้าของร้านเพิ่มสิทธิ์ดูคำสั่งซื้อ (NO_PERMISSION 2026-08-10)"
+    # เจ้าของร้านเพิ่มสิทธิ์ดูคำสั่งซื้อให้แล้ว — เปิดใช้ 2026-08-18
+    # (ปิดไว้ตั้งแต่ 2026-08-10 เพราะ NO_PERMISSION)
+    enabled: true
 
   - shop_id: lazada_03
     platform: lazada
@@ -85,6 +86,17 @@ shops:
     adapter: playwright
     display_name: "เฮียเก๋าเครื่องมือช่าง ราคาถูก"
     account_key: TIKTOK_05
+    enabled: true
+
+  # ร้านใหม่ เพิ่ม 2026-08-18 ตามที่เจ้าของงานสั่ง (ชื่อร้านตามที่สั่งมา: Metool)
+  #
+  # ⚠️ ยังไม่มี TIKTOK_06_ACCOUNT ใน .env — ใส่ทีหลังได้ ไม่ใส่ก็ดึงได้ปกติ
+  #    ค่านั้นเก็บแค่ "ชื่อบัญชี" ไว้เตือนตอนสั่ง login ไม่ใช่รหัสผ่าน
+  - shop_id: tiktok_06
+    platform: tiktok
+    adapter: playwright
+    display_name: "Metool"
+    account_key: TIKTOK_06
     enabled: true
 
   # ── Shopee: 10 ร้าน จาก 7 บัญชี ───────────────────────────
@@ -169,6 +181,9 @@ shops:
     platform: shopee
     adapter: playwright
     display_name: "Superhomefactory"
+    # ชื่อบัญชีที่ Seller Centre โชว์ — ร้านนี้มีร้านเดียวต่อบัญชี จึงไม่มีหน้าเลือกร้าน
+    # หน้าเว็บเลยคืนชื่อบัญชีแทนชื่อร้าน เจ้าของงานยืนยันความถูกต้อง 2026-08-13
+    web_account_name: "uneno"
     account_key: SHOPEE_09
     enabled: true
 
@@ -176,6 +191,9 @@ shops:
     platform: shopee
     adapter: playwright
     display_name: "DIY tools ขายเครื่องมือช่าง"
+    # ชื่อบัญชีที่ Seller Centre โชว์ — ร้านนี้มีร้านเดียวต่อบัญชี จึงไม่มีหน้าเลือกร้าน
+    # หน้าเว็บเลยคืนชื่อบัญชีแทนชื่อร้าน เจ้าของงานยืนยันความถูกต้อง 2026-08-13
+    web_account_name: "diy.tools"
     account_key: SHOPEE_10
     enabled: true
 
@@ -183,6 +201,9 @@ shops:
     platform: shopee
     adapter: playwright
     display_name: "Jumbo A"
+    # ชื่อบัญชีที่ Seller Centre โชว์ — ร้านนี้มีร้านเดียวต่อบัญชี จึงไม่มีหน้าเลือกร้าน
+    # หน้าเว็บเลยคืนชื่อบัญชีแทนชื่อร้าน เจ้าของงานยืนยันความถูกต้อง 2026-08-13
+    web_account_name: "jumboa_shop"
     account_key: SHOPEE_11
     enabled: true
 
@@ -201,3 +222,141 @@ shops:
   # ⚠️ ต่างจากร้านที่ตั้ง enabled: false ตรงที่อันนั้นคือ "ติดปัญหาเทคนิค รอแก้"
   #    แต่ 3 ร้านนี้คือ "ไม่ได้รับความยินยอม" — ห้ามเปิดกลับเองเด็ดขาด
   #    ถ้าวันหนึ่งทางร้านอนุญาต ต้องได้รับการยืนยันจากเจ้าของงานก่อนเท่านั้น
+
+  # ═══════════════════════════════════════════════════════════
+  #  ร้าน Official OSUKA — เพิ่ม 2026-08-19 ตามที่เจ้าของงานส่งรายชื่อมา
+  # ═══════════════════════════════════════════════════════════
+  #
+  # ⚠️ คนละกลุ่มกับร้าน dealer ข้างบน — บน Dashboard มีตัวกรอง
+  #    "Storefront: Dealers | Official OSUKA" แยกกันอยู่แล้ว
+  #    ร้านชุดนี้คือฝั่ง Official OSUKA ทั้งหมด
+  #
+  # ⚠️ ตั้ง enabled: false ไว้ก่อนทุกร้าน — ยังไม่ได้ล็อกอินสักร้าน
+  #    เจ้าของงานจะมาไล่ล็อกอินเอง 2026-08-20
+  #    เปิดใช้ทีละร้านหลังล็อกอินผ่านแล้วเท่านั้น อย่าเปิดรวดเดียวทั้งชุด
+  #
+  # ✅ ประกาศใน brands.yaml แล้ว — เจ้าของงานตัดสิน 2026-08-19 ให้รวมทั้ง 16 ร้าน
+  #    เป็นแบรนด์ "OSUKA" ก้อนเดียว ยอดจะถูกรวมเป็นก้อนเดียวโดยตั้งใจ
+  #
+  # ⚠️ display_name ข้างล่างเป็น "ชื่อชั่วคราวตามที่เจ้าของงานส่งมา"
+  #    เจ้าของงานสั่ง 2026-08-19: ตอนล็อกอินให้เอา "ชื่อร้านจริงบนหน้าเว็บ" มาแทน
+  #    ค่านี้ถูกใช้ตั้งชื่อไฟล์ Excel และจับคู่แถวร้านบนหน้า /portal/shop ของ Shopee
+  #    ถ้าไม่ตรงเป๊ะจะกดผิดร้านหรือหาไม่เจอ — ต้องแก้ให้ตรงก่อนเปิด enabled: true
+  #
+  # ── Lazada 8 ร้าน ──────────────────────────────────────────
+  - shop_id: lazada_04
+    platform: lazada
+    adapter: playwright
+    display_name: "Tan tool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_05
+    platform: lazada
+    adapter: playwright
+    display_name: "GoodsThaitool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_06
+    platform: lazada
+    adapter: playwright
+    display_name: "Japan.Tools"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_07
+    platform: lazada
+    adapter: playwright
+    display_name: "Thebesttool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_08
+    platform: lazada
+    adapter: playwright
+    display_name: "Osuka lazmall"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_09
+    platform: lazada
+    adapter: playwright
+    display_name: "MR.POOM"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_10
+    platform: lazada
+    adapter: playwright
+    display_name: "Deedeetools"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: lazada_11
+    platform: lazada
+    adapter: playwright
+    display_name: "Spanner tool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  # ── Shopee 7 ร้าน ──────────────────────────────────────────
+  - shop_id: shopee_12
+    platform: shopee
+    adapter: playwright
+    display_name: "baanchangtool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: shopee_13
+    platform: shopee
+    adapter: playwright
+    display_name: "Estp toolsshop"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: shopee_14
+    platform: shopee
+    adapter: playwright
+    display_name: "Dee dee tools"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: shopee_15
+    platform: shopee
+    adapter: playwright
+    display_name: "ร้าน Klongthom"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  # ⚠️ ชื่อตามที่เจ้าของงานส่งมาเป๊ะ ๆ ขึ้นต้นด้วยตัว l เล็ก ไม่ใช่ I ใหญ่
+  #    ยังไม่แก้เอง — ต้องยืนยันกับหน้าร้านจริงตอนล็อกอิน
+  - shop_id: shopee_16
+    platform: shopee
+    adapter: playwright
+    display_name: "lronHands Tools"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  - shop_id: shopee_17
+    platform: shopee
+    adapter: playwright
+    display_name: "Lab Tools By ช่างชัวร์"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  # ⚠️ ชื่อตามที่ส่งมาเป๊ะ ๆ สะกด Handware ไม่ใช่ Hardware — ยังไม่แก้เอง
+  - shop_id: shopee_18
+    platform: shopee
+    adapter: playwright
+    display_name: "ALL-Tool&Handware"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
+
+  # ── TikTok 1 ร้าน ──────────────────────────────────────────
+  - shop_id: tiktok_07
+    platform: tiktok
+    adapter: playwright
+    display_name: "OSUKAPowertool"
+    enabled: false
+    skip_reason: "ร้าน Official OSUKA — รอล็อกอิน (เพิ่ม 2026-08-19)"
