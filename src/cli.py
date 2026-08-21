@@ -233,9 +233,13 @@ def reminders(run_time: str, before_s: str) -> None:
               help="ถ้าส่งของวันนี้ไปแล้วให้ออกทันที (ใช้กับ task สำรอง)")
 @click.option("--only-if-complete", is_flag=True,
               help="ส่งเฉพาะเมื่อดึงครบทุกร้าน มีร้านไหน FAILED ไม่ส่ง")
+@click.option("--alert-to", "alert_to", default=mailer.ALERT_TO,
+              help="อีเมลที่จะเตือนเมื่อดึงไม่ครบ คั่นหลายคนด้วย ,")
+@click.option("--no-alert", is_flag=True,
+              help="ไม่ต้องส่งเมลเตือนเมื่อดึงไม่ครบ (ใช้ตอนทดสอบ)")
 def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
            no_excel: bool, draft: bool, skip_if_sent: bool,
-           only_if_complete: bool) -> None:
+           only_if_complete: bool, alert_to: str, no_alert: bool) -> None:
     """ส่งสรุปผลการดึงทางอีเมลผ่าน Outlook"""
     cfg = load_config()
     out_dir = PROJECT_ROOT / cfg.settings.paths.output_dir
@@ -254,6 +258,26 @@ def notify(to_s: str | None, cc_s: str | None, run_date_s: str | None,
             names = ", ".join(r["shop_id"] for r in bad)
             click.echo(f"⛔ ไม่ส่งอีเมล — ยังดึงไม่ครบ ({len(bad)} ร้านล้มเหลว: {names})")
             click.echo("   แก้ให้ครบแล้วรัน notify อีกครั้ง หรือส่งเองด้วย .\\send_report.ps1")
+
+            # ⚠️ หยุดส่งเฉย ๆ ไม่พอ ต้องบอกด้วยว่าหยุดเพราะอะไร
+            #    ของเดิมออกด้วย exit 0 เงียบ ๆ วันที่ระบบพังจึงไม่มีอะไรออกมาเลย
+            #    (เจ้าของงานต้องมาถามเองตอนสาย 2026-08-18)
+            #    ส่งวันละฉบับพอ กัน task สำรองยิงซ้ำจนกลายเป็นสัญญาณรบกวน
+            marker = (PROJECT_ROOT / cfg.settings.paths.logs_dir
+                      / f".alert_sent_{run_date}")
+            if no_alert:
+                click.echo("   (ข้ามการส่งเมลเตือนตามที่สั่งด้วย --no-alert)")
+            elif marker.exists():
+                click.echo(f"   ส่งเมลเตือนของ {run_date} ไปแล้วเมื่อ "
+                           f"{marker.read_text(encoding='utf-8').strip()}")
+            elif mailer.send_incomplete_alert(run_date, bad, len(rows),
+                                              to=alert_to, draft=draft):
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                  encoding="utf-8")
+                click.echo(f"   📧 ส่งเมลเตือนไปที่ {alert_to} แล้ว")
+            else:
+                click.echo("   ⚠️ ส่งเมลเตือนไม่สำเร็จ — ดู Dashboard แทน")
             sys.exit(0)
 
     # กันส่งซ้ำ — รอบหลักส่งท้าย run_daily แล้ว task สำรองตอน 8 โมงจะได้ไม่ส่งอีกฉบับ

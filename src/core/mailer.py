@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from src.core.models import RunStatus
@@ -55,6 +55,91 @@ def read_rows(db_path: Path, run_date: str | None = None) -> tuple[str, list[dic
 
 TH_MONTH_ABBR = ("ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
                  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.")
+
+# คนที่ต้องรู้เมื่อระบบดึงไม่ครบ — คนละชุดกับผู้รับรายงานยอด 21 คน
+# เตือนคือเรื่องของคนที่ลงมือแก้ ไม่ใช่เรื่องของทุกคนที่ดูยอด
+ALERT_TO = "Pitchaya.L@imaxpowertool.com"
+
+# error_type ที่ยิงซ้ำก็ไม่ผ่าน ต้องมีคนไปล็อกอินเอง (กฎเหล็กข้อ 5)
+NEEDS_HUMAN = ("AUTH_EXPIRED", "AUTH_REQUIRED", "NO_PERMISSION")
+
+
+def build_incomplete_html(run_date: str, bad: list[dict], total: int) -> str:
+    """เนื้อเมลเตือนว่ารอบดึงไม่ครบ — บอกร้านที่ล้ม สาเหตุ และคำสั่งที่ต้องรัน"""
+    tr = []
+    for r in bad:
+        sid = r.get("shop_id", "")
+        et = r.get("error_type") or "ไม่ระบุ"
+        msg = (r.get("error_message") or "")[:160]
+        fix = (f".\\.venv\\Scripts\\python.exe scripts\\login_save.py --shop {sid}"
+               if et in NEEDS_HUMAN else f".\\run_daily.ps1 -Shop {sid}")
+        tr.append(
+            f"<tr>"
+            f"<td style='padding:6px 12px;border:1px solid #ddd'><b>{sid}</b><br>"
+            f"<span style='color:#666;font-size:12px'>{r.get('shop_name','')}</span></td>"
+            f"<td style='padding:6px 12px;border:1px solid #ddd;color:#cf222e'>{et}</td>"
+            f"<td style='padding:6px 12px;border:1px solid #ddd;font-size:12px'>{msg}</td>"
+            f"<td style='padding:6px 12px;border:1px solid #ddd;"
+            f"font-family:Consolas;font-size:12px'>{fix}</td></tr>")
+
+    need_login = [r.get("shop_id", "") for r in bad
+                  if (r.get("error_type") or "") in NEEDS_HUMAN]
+    note = ""
+    if need_login:
+        note = (f"<p style='color:#C00000'><b>ต้องให้คนล็อกอินเอง {len(need_login)} ร้าน</b> "
+                f"({', '.join(need_login)}) — ยิงซ้ำเองไม่ผ่าน "
+                f"และเสี่ยงโดนล็อกบัญชี</p>")
+
+    return (
+        f"<div style='font-family:Segoe UI,Tahoma'>"
+        f"<h3 style='color:#C00000'>ดึงยอดไม่ครบ — ยังไม่ได้ส่งรายงานประจำวัน</h3>"
+        f"<p>รอบวันที่ <b>{run_date}</b> ล้ม <b>{len(bad)}</b> ร้าน จาก {total} ร้าน "
+        f"รายงานยอดจึงยัง<b>ไม่ถูกส่ง</b>ให้ผู้รับทั้ง 21 คน ตามกฎ "
+        f"&quot;ไม่ครบทุกร้าน ห้ามส่งเมล&quot;</p>"
+        f"{note}"
+        f"<table style='border-collapse:collapse;font-size:13px'>"
+        f"<tr style='background:#f6f8fa'>"
+        f"<th style='padding:6px 12px;border:1px solid #ddd'>ร้าน</th>"
+        f"<th style='padding:6px 12px;border:1px solid #ddd'>สาเหตุ</th>"
+        f"<th style='padding:6px 12px;border:1px solid #ddd'>รายละเอียด</th>"
+        f"<th style='padding:6px 12px;border:1px solid #ddd'>คำสั่งที่ต้องรัน</th></tr>"
+        f"{''.join(tr)}</table>"
+        f"<p style='margin-top:14px'>แก้ครบแล้วส่งรายงานด้วย<br>"
+        f"<span style='font-family:Consolas;font-size:12px'>"
+        f".\\send_report.ps1 -DataDate {_prev_day(run_date)}</span></p>"
+        f"<p style='color:#888;font-size:11px'>ส่งอัตโนมัติเมื่อรอบดึงไม่ครบ · "
+        f"{datetime.now():%Y-%m-%d %H:%M}</p></div>")
+
+
+def _prev_day(run_date: str) -> str:
+    """วันของข้อมูล = วันก่อนวันที่รัน"""
+    try:
+        y, m, d = (int(x) for x in run_date.split("-"))
+        return (date(y, m, d) - timedelta(days=1)).isoformat()
+    except Exception:                                    # noqa: BLE001
+        return run_date
+
+
+def send_incomplete_alert(run_date: str, bad: list[dict], total: int,
+                          to: str = ALERT_TO, draft: bool = False) -> bool:
+    """เตือนว่ารอบดึงไม่ครบ — คืน True ถ้าส่งออกไปแล้ว
+
+    ⚠️ ทำไมต้องมี — ด่าน --only-if-complete หยุดการส่งรายงานแล้วออกด้วย exit 0
+       ผลคือวันที่ระบบพัง จะไม่มีอะไรออกมาเลย เงียบสนิทจนกว่าจะมีคนมาถาม
+       เจอจริง 2026-08-18: tiktok_02 ล้มตอน 08:30 ไม่มีใครรู้จนเจ้าของงานถามตอน 09:0x
+       การหยุดส่งที่ไม่บอกใคร ทำให้ความพังกลายเป็นความเงียบ
+
+    ส่งไม่สำเร็จก็ไม่ทำให้ notify ล้ม — ตัวเตือนพังห้ามลากงานหลักลงไปด้วย
+    """
+    shops = ", ".join(r.get("shop_id", "") for r in bad)
+    try:
+        send(subject=f"⚠️ ดึงยอดไม่ครบ {run_date} — ล้ม {len(bad)} ร้าน ({shops})",
+             html=build_incomplete_html(run_date, bad, total),
+             to=[t.strip() for t in to.split(",") if t.strip()],
+             send_now=not draft)
+        return True
+    except Exception:                                    # noqa: BLE001
+        return False
 
 
 def data_period(data_from: str | None, data_to: str | None) -> str:
