@@ -213,11 +213,45 @@ class PlaywrightAdapter(BaseAdapter):
             timezone_id=self.settings.timezone,
             args=["--disable-blink-features=AutomationControlled"],
         )
+        # ⚠️ ห้ามถอยไปใช้ Chromium ที่มากับ Playwright แบบเงียบ ๆ
+        #
+        #    เปิด Chrome จริงไม่ได้ = มี Chrome ค้างล็อกโฟลเดอร์โปรไฟล์อยู่ (เกือบทุกครั้ง)
+        #    ถ้าถอยไปใช้ Chromium แทน จะได้เบราว์เซอร์คนละตัวบนโปรไฟล์เดียวกัน
+        #    แพลตฟอร์มมองว่าเป็นอุปกรณ์ใหม่ → เด้งไปหน้า login → รายงาน AUTH_EXPIRED
+        #    ทั้งที่ session ยังดีอยู่ แล้วคนต้องมานั่งล็อกอินใหม่โดยไม่จำเป็น
+        #
+        #    หลักฐาน 2026-08-08: tiktok_01/03/04/05 ขึ้น AUTH_EXPIRED พร้อมกันนาทีเดียว
+        #    ทั้งที่เป็นคนละบัญชีคนละโปรไฟล์ — session ของ 4 บัญชีหมดอายุพร้อมกันเป๊ะไม่ได้
+        #    และ tiktok_02 เจอ chrome_channel_unavailable 09:07 แล้ว AUTH_EXPIRED 09:08
+        #    เจ้าของงานยืนยันว่า TikTok ปกติ session อยู่ได้ 1-2 สัปดาห์
+        #
+        #    จึงเคลียร์ Chrome ค้างแล้วลองใหม่ ถ้ายังไม่ได้ให้ล้มไปเลย
+        #    ล้มดังดีกว่าเผา session ทิ้งเงียบ ๆ แล้วโทษว่าแพลตฟอร์มเตะเรา
         try:
             self._context = self._pw.chromium.launch_persistent_context(channel="chrome", **opts)
         except Exception as exc:                         # noqa: BLE001
-            log.warning("chrome_channel_unavailable", shop_id=self.shop.shop_id, err=str(exc)[:120])
-            self._context = self._pw.chromium.launch_persistent_context(**opts)
+            log.warning("chrome_launch_failed_retrying", shop_id=self.shop.shop_id,
+                        err=str(exc)[:120])
+            from src.core.browser_cleanup import close_stale_browsers
+
+            # ⚠️ ล้างเฉพาะโปรไฟล์ของร้านนี้ ห้ามกวาดทั้งโฟลเดอร์
+            #    ตัวที่ขวางเราคือ Chrome ที่จับ profile_dir ของเราอยู่เท่านั้น
+            #    กวาดทั้งโฟลเดอร์จะไปฆ่าเบราว์เซอร์ของงานขนานที่กำลังทำงานอยู่
+            #    (เกิดจริง 2026-08-18 — ดูเหตุผลเต็มใน browser_cleanup.py)
+            closed = close_stale_browsers(only_profile=self.profile_dir.name)
+            log.info("chrome_cleanup_before_retry", shop_id=self.shop.shop_id,
+                     profile=self.profile_dir.name, closed=closed)
+            time.sleep(5)
+            try:
+                self._context = self._pw.chromium.launch_persistent_context(
+                    channel="chrome", **opts)
+            except Exception as exc2:                    # noqa: BLE001
+                raise AdapterError(
+                    ErrorType.NETWORK,
+                    f"เปิด Chrome จริงไม่ได้แม้เคลียร์ตัวค้างไปแล้ว {closed} process — "
+                    f"ไม่ถอยไปใช้ Chromium เพราะจะทำให้ session หลุดโดยไม่จำเป็น "
+                    f"({str(exc2)[:120]})",
+                ) from exc2
 
         self._context.set_default_timeout(60_000)
         self._restore_session_cookies()

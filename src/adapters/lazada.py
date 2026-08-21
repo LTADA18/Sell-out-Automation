@@ -32,7 +32,34 @@ SEL = {
                    'text="Export All"',
                    'text="ส่งออกทั้งหมด"'],
     "confirm_btn": ['button:has-text("ยืนยัน")', 'button:has-text("Confirm")', 'button:has-text("OK")'],
-    "download_link": ['text="ดาวน์โหลดไฟล์"', 'text="Download file"'],
+    # ⚠️ Lazada ปนภาษาในหน้าเดียวกัน — ตัวหน้าเป็นไทย ("ข้อมูลการส่งออก" /
+    #    "ในการประมวลผล" / "ความสำเร็จ") แต่ปุ่มในคอลัมน์การดำเนินงานเป็นอังกฤษ
+    #    ว่า "Download Result File" ซึ่งไม่ตรงกับ 2 ตัวเดิมเลยสักตัว
+    #    ผลคือไฟล์ปั่นเสร็จแล้วแต่ระบบมองไม่เห็นปุ่ม เลยนั่งรอจนหมดเวลา
+    #    แล้วรายงานว่า TIMEOUT ทั้งที่ของพร้อมอยู่ตรงหน้า (เจอจริง 2026-08-18)
+    #
+    #    ใช้ has-text (จับแบบมีคำนี้อยู่ข้างใน) ไม่ใช่ text= (ต้องตรงเป๊ะ)
+    #    จะได้ทนต่อการเปลี่ยนคำของแพลตฟอร์มมากขึ้น
+    "download_link": ['a:has-text("Download Result File")',
+                      'button:has-text("Download Result File")',
+                      'text="ดาวน์โหลดไฟล์"',
+                      'text="Download file"',
+                      'a:has-text("ดาวน์โหลด")',
+                      'a:has-text("Download")'],
+    # ── กล่อง "ข้อมูลการส่งออก" ─────────────────────────────
+    # Lazada ปฏิเสธคำขอ Export ได้ตั้งแต่แรกโดยไม่สร้างงานเลย กล่องจะขึ้น
+    # กากบาทแดงพร้อมข้อความ "การสร้างงานล้มเหลวโปรดลองอีกครั้ง..."
+    # ของเดิมไม่รู้จักสถานะนี้ จึงนั่งรอปุ่มดาวน์โหลดที่ไม่มีวันมาจนครบ 30 นาที
+    # แล้วรายงานว่า TIMEOUT ซึ่งชี้ไปผิดทางสนิท (เจอจริง 2026-08-18)
+    "export_dialog": ['[data-spm="excel_export_dialog"]'],
+    "export_failed": ['use[*|href="#export-icon-error"]',
+                      'text=/การสร้างงานล้มเหลว/',
+                      'text=/failed.*try again/i'],
+    "export_retry": ['button.next-btn-warning:has-text("ลองใหม่")',
+                     'button:has-text("ลองใหม่")',
+                     'button:has-text("Retry")'],
+    "export_history_btn": ['[data-spm="d_show_history_btn"]',
+                           'button:has-text("ดูประวัติ")'],
     # ปุ่มบนหน้า login — exact=True กันไปโดน "เข้าสู่ระบบด้วย OTP" ที่อยู่ใต้กันพอดี
     "login_btn": ['button:text-is("เข้าสู่ระบบ")', 'button:text-is("Login")',
                   'button:text-is("Sign in")'],
@@ -288,7 +315,7 @@ class LazadaAdapter(PlaywrightAdapter):
                 page, lambda: _click_first(page, SEL["download_link"], 20000), 120_000
             )
 
-    def _wait_download_link(self, page, timeout_sec: int = 900) -> None:
+    def _wait_download_link(self, page, timeout_sec: int = 1800) -> None:
         """รอจนลิงก์ "ดาวน์โหลดไฟล์" โผล่ในกล่องผลลัพธ์
 
         ⚠️ Lazada ปั่นไฟล์แบบไม่ส่งกลับมาทันทีเมื่อข้อมูลเยอะ
@@ -302,19 +329,86 @@ class LazadaAdapter(PlaywrightAdapter):
 
            ตรงนี้แค่ "รอให้ลิงก์โผล่" ไม่ได้กดอะไร ถ้าครบเวลาแล้วยังไม่มา
            ก็ปล่อยให้ _capture_download ด้านล่างรายงาน TIMEOUT ตามเดิม
+
+        ⚠️ ต้องเขียน log ระหว่างรอทุก 60 วินาที ห้ามเงียบยาว
+           ของเดิมเงียบตั้งแต่เริ่มรอจนหมดเวลา คนที่เฝ้าอยู่จึงแยกไม่ออกว่า
+           "กำลังรออยู่ตามปกติ" กับ "ตายไปแล้ว" ต่างกันยังไง
+           เจอจริง 2026-08-18: เห็นเงียบ 9 นาทีเลยสั่งหยุดงานทิ้ง ทั้งที่มันยัง
+           รออยู่ถูกต้อง และฝั่ง Lazada ก็ยังปั่นไฟล์ไม่เสร็จจริง ๆ
+           งานที่ยังไม่ตายถูกฆ่าเพราะมันไม่ส่งเสียง
+
+        ขยายจาก 900 เป็น 1800 วินาที — ร้าน 18,138 ออเดอร์ปั่นไฟล์เกิน 15 นาที
         """
         import time as _t
 
-        deadline = _t.time() + timeout_sec
-        while _t.time() < deadline:
-            for sel in SEL["download_link"]:
+        # ── โหมดส่อง: เก็บภาพ+HTML ณ วินาทีที่เริ่มรอ ────────────────
+        # ⚠️ เปิดด้วย LAZADA_DIAG=1 เท่านั้น ไม่ให้รบกวนรอบปกติ
+        #    มีไว้เพราะไล่แก้ selector ด้วยการเดาแล้วรอ 30 นาทีต่อรอบ แพงเกินไป
+        #    ต้องเห็นว่า "ตอนที่มันรออยู่" บนหน้าจอมีอะไรจริง ๆ
+        import os as _os
+
+        if _os.getenv("LAZADA_DIAG") == "1":
+            try:
+                d = Path(__file__).resolve().parents[2] / "output" / "_diag"
+                d.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(d / f"{self.shop.shop_id}_waiting.png"))
+                (d / f"{self.shop.shop_id}_waiting.html").write_text(
+                    page.content(), encoding="utf-8")
+                log.info("lazada_diag_captured", shop_id=self.shop.shop_id, dir=str(d))
+            except Exception as exc:                     # noqa: BLE001
+                log.warning("lazada_diag_failed", err=str(exc)[:120])
+
+        started = _t.time()
+        deadline = started + timeout_sec
+        next_beat = started + 60
+        retries = 0
+        MAX_RETRY = 2
+
+        def _visible(keys: list[str]) -> bool:
+            for sel in keys:
                 try:
-                    if page.locator(sel).first.is_visible(timeout=1500):
-                        log.info("lazada_export_ready", shop_id=self.shop.shop_id,
-                                 waited_sec=int(timeout_sec - (deadline - _t.time())))
-                        return
+                    if page.locator(sel).first.is_visible(timeout=1200):
+                        return True
                 except Exception:                        # noqa: BLE001
                     continue
+            return False
+
+        while _t.time() < deadline:
+            # 1) ได้ปุ่มดาวน์โหลดแล้ว = ปั่นไฟล์เสร็จ
+            if _visible(SEL["download_link"]):
+                log.info("lazada_export_ready", shop_id=self.shop.shop_id,
+                         waited_sec=int(_t.time() - started))
+                return
+
+            # 2) Lazada ปฏิเสธคำขอ — ห้ามรอต่อ ของจะไม่มีวันมา
+            #    กด "ลองใหม่" ได้ไม่กี่ครั้ง แล้วต้องยอมแพ้เร็ว ๆ
+            #    ยิงถี่เกินไปจะยิ่งโดนกัน (i18n ของเขามี operateFrequentlyError
+            #    = "กรุณาอย่าใช้งานบ่อยครั้ง โปรดลองใหม่ในภายหลัง")
+            if _visible(SEL["export_failed"]):
+                if retries >= MAX_RETRY:
+                    log.warning("lazada_export_rejected", shop_id=self.shop.shop_id,
+                                retries=retries)
+                    raise AdapterError(
+                        ErrorType.RATE_LIMITED,
+                        "Lazada ปฏิเสธคำขอ Export (การสร้างงานล้มเหลว) "
+                        f"กด 'ลองใหม่' ไปแล้ว {retries} ครั้งยังไม่ผ่าน — "
+                        "มักเป็นเพราะสั่ง Export ถี่เกินไป ให้เว้นช่วงแล้วค่อยลองใหม่",
+                    )
+                retries += 1
+                log.warning("lazada_export_failed_retrying",
+                            shop_id=self.shop.shop_id, attempt=retries)
+                _click_first(page, SEL["export_retry"], 5000)
+                page.wait_for_timeout(15_000)            # เว้นช่วงก่อนยิงซ้ำ
+                started = _t.time()                      # เริ่มนับเวลารอใหม่
+                deadline = started + timeout_sec
+                next_beat = started + 60
+                continue
+
+            if _t.time() >= next_beat:
+                log.info("lazada_export_waiting", shop_id=self.shop.shop_id,
+                         waited_sec=int(_t.time() - started),
+                         limit_sec=timeout_sec, retries=retries)
+                next_beat += 60
             page.wait_for_timeout(5000)
         log.warning("lazada_export_still_building", shop_id=self.shop.shop_id,
                     waited_sec=timeout_sec)

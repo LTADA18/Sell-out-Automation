@@ -274,13 +274,24 @@ class TiktokAdapter(PlaywrightAdapter):
         except Exception:                                # noqa: BLE001
             return set()
 
-    def _wait_for_new_file(self, page, before: set[str], timeout_sec: int = 300) -> str:
+    def _wait_for_new_file(self, page, before: set[str], timeout_sec: int = 900) -> str:
         """รอจนแถวใหม่ในประวัติสร้างเสร็จ (สปินเนอร์ -> ปุ่มดาวน์โหลด)
 
         ชื่อไฟล์มีเวลาในตัว ("ทั้งหมด คำสั่งซื้อ-2026-08-03-16:36.xlsx")
         จึงยืนยันได้ว่าได้ไฟล์ของรอบนี้จริง ไม่ใช่ไฟล์เก่าที่ค้างอยู่ในประวัติ
+
+        ⚠️ ขยายจาก 300 เป็น 900 วินาที — 300 พอสำหรับรอบรายวัน (ไฟล์เล็ก)
+           แต่ไม่พอสำหรับดึงย้อนหลังรายเดือน tiktok_06 เดือน มิ.ย. ล้มที่ 300 วิ
+           ทั้งที่เดือนอื่นของร้านเดียวกันผ่านได้ (2026-08-18)
+
+        ⚠️ ต้องเขียน log ระหว่างรอทุก 60 วินาที ห้ามเงียบยาว
+           ปัญหาเดียวกับ lazada._wait_download_link — เงียบตั้งแต่เริ่มรอจนหมดเวลา
+           ทำให้แยกไม่ออกว่า "รออยู่ตามปกติ" กับ "ตายแล้ว" แล้วคนที่เฝ้าจะ
+           ไปฆ่างานที่ยังทำงานอยู่ถูกต้อง
         """
-        deadline = datetime.now() + timedelta(seconds=timeout_sec)
+        started = datetime.now()
+        deadline = started + timedelta(seconds=timeout_sec)
+        next_beat = started + timedelta(seconds=60)
         while datetime.now() < deadline:
             page.wait_for_timeout(5000)
             new = self._history_labels(page) - before
@@ -291,6 +302,12 @@ class TiktokAdapter(PlaywrightAdapter):
                 # ทั้งที่แถวใหม่ยังขึ้น "กำลังส่งออก" อยู่
                 if self._try_row_download_button(page, label) is not None:
                     return label
+            if datetime.now() >= next_beat:
+                waited = int((datetime.now() - started).total_seconds())
+                log.info("tiktok_export_waiting", shop_id=self.shop.shop_id,
+                         waited_sec=waited, limit_sec=timeout_sec,
+                         new_rows=len(new) if new else 0)
+                next_beat += timedelta(seconds=60)
         raise AdapterError(
             ErrorType.TIMEOUT,
             f"รอไฟล์ในประวัติการส่งออกเกิน {timeout_sec} วินาทีแล้วยังไม่เสร็จ",

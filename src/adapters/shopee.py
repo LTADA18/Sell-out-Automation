@@ -590,6 +590,106 @@ class ShopeeAdapter(PlaywrightAdapter):
                 return panel
         return None
 
+    def _header_text(self, page) -> str:
+        """ข้อความหัวปฏิทินแผงซ้าย เช่น 'July2026' — ใช้ดูว่าเลื่อนไปถึงไหนแล้ว"""
+        try:
+            panel = page.locator(".eds-daterange-picker-panel__body-left").first
+            if panel.count() == 0:
+                return ""
+            labels = panel.locator(SEL["month_label"][0]).all_inner_texts()
+            return "".join(x.strip() for x in labels[:2]).replace(" ", "")
+        except Exception:                                # noqa: BLE001
+            return ""
+
+    def _panel_month(self, page) -> tuple[int, int] | None:
+        """เดือน/ปีที่แผงซ้ายกำลังแสดง เช่น (2026, 7) — อ่านไม่ได้คืน None"""
+        text = self._header_text(page)
+        if not text:
+            return None
+        year = "".join(c for c in text if c.isdigit())
+        word = "".join(c for c in text if not c.isdigit()).strip()
+        if not year or not word:
+            return None
+        for i, name in enumerate(self.TH_MONTHS, 1):
+            if word.startswith(name):
+                return int(year), i
+        low = word.lower()
+        for i, name in enumerate(self.EN_MONTHS, 1):
+            if low.startswith(name.lower()) or low.startswith(name[:3].lower()):
+                return int(year), i
+        return None
+
+    def _step_one_month(self, page, forward: bool) -> bool:
+        """เลื่อนปฏิทิน 1 เดือน ไปข้างหน้าหรือถอยหลัง — คืน False ถ้าไปต่อไม่ได้
+
+        ⚠️ ต้องเลื่อนไปข้างหน้าได้ด้วย ไม่ใช่ถอยอย่างเดียว
+           ช่วงข้ามเดือน (เช่น 1 ม.ค. – 31 ก.ค.) พอเลือกวันเริ่มเสร็จ ปฏิทินจะอยู่ที่ ม.ค.
+           แล้ววันจบอยู่ ก.ค. ซึ่งต้องเดินหน้า 6 เดือน
+           ของเดิมถอยได้ทางเดียว จึงเดินถอยจนสุดแล้วรายงานว่าหาเดือนไม่เจอ
+           (เจอจริง 2026-08-13: ขอ 1 ม.ค.–31 ก.ค. แล้วปฏิทินไปจบที่ July2023)
+           ดึงทีละเดือนไม่เคยเจอ เพราะวันเริ่มกับวันจบอยู่เดือนเดียวกัน
+        """
+        sel = ".eds-picker-header__next" if forward else SEL["prev_month"][0]
+        undo = SEL["prev_month"][0] if forward else ".eds-picker-header__next"
+        return self._step_with_arrows(page, sel, undo)
+
+    def _step_back_one_month(self, page) -> bool:
+        """ถอยปฏิทิน 1 เดือน — คืน False ถ้าถอยต่อไม่ได้แล้ว
+
+        ⚠️ ทำไมต้องมีตัวนี้ แทนที่จะกด .eds-picker-header__prev เฉย ๆ
+           ในหัวปฏิทินมีลูกศรถอยหลัง 2 ปุ่มที่ใช้ class เดียวกันเป๊ะ:
+               ปุ่มที่ 1  ลูกศรคู่   = ถอย "ปี"
+               ปุ่มที่ 2  ลูกศรเดี่ยว = ถอย "เดือน"
+           ของเดิมใช้ _click_first ซึ่งกดตัวแรกเสมอ = ถอยทีละปี
+           จาก July 2026 จะไป July 2025 → July 2024 กด 24 ครั้งก็ไม่มีวันถึง Jan 2026
+           แล้วรายงานว่า "เลื่อนปฏิทินไปหาเดือนไม่ได้" ทั้งที่ปฏิทินใช้งานได้ปกติ
+           (เจอจริง 2026-08-13 กับ shopee_10 ซึ่งหลังบ้านตั้งเป็นภาษาอังกฤษ)
+
+           ไม่ hardcode ว่า "กดปุ่มที่ 2" เพราะร้านอื่นอีก 9 ร้านใช้ทางนี้แล้วผ่าน
+           หน้าตาอาจไม่เหมือนกันทุกร้าน จึงกดแล้ววัดผลจริงจากหัวปฏิทิน
+           ถ้าเลื่อนผิดทาง (ปีเปลี่ยนแทนเดือน) ให้ถอยคืนแล้วเปลี่ยนไปกดอีกปุ่ม
+        """
+        return self._step_with_arrows(page, SEL["prev_month"][0],
+                                      ".eds-picker-header__next")
+
+    def _step_with_arrows(self, page, sel: str, undo_sel: str) -> bool:
+        """กดลูกศรแล้ววัดผลจริง — ถ้าโดนปุ่ม 'ปี' ให้ถอยคืนแล้วลองปุ่มถัดไป"""
+        arrows = page.locator(sel)
+        n = arrows.count()
+        if n == 0:
+            return False
+
+        # ปุ่มเดือนอยู่ถัดจากปุ่มปีเสมอ จึงลอง nth(1) ก่อน แล้วค่อยถอยไป nth(0)
+        for idx in ([1, 0] if n >= 2 else [0]):
+            before = self._header_text(page)
+            try:
+                arrows.nth(idx).click(timeout=4000)
+            except Exception:                            # noqa: BLE001
+                continue
+            page.wait_for_timeout(700)
+            after = self._header_text(page)
+            if not after or after == before:
+                continue
+
+            # ปีเปลี่ยนแต่ชื่อเดือนเท่าเดิม = กดโดนปุ่มปี ไม่ใช่ปุ่มเดือน
+            b_digits = "".join(c for c in before if c.isdigit())
+            a_digits = "".join(c for c in after if c.isdigit())
+            b_word = "".join(c for c in before if not c.isdigit())
+            a_word = "".join(c for c in after if not c.isdigit())
+            if b_word == a_word and b_digits != a_digits:
+                log.info("shopee_arrow_was_year", shop_id=self.shop.shop_id,
+                         before=before, after=after, arrow_index=idx, sel=sel)
+                undo = page.locator(undo_sel)
+                if undo.count() > idx:
+                    try:
+                        undo.nth(idx).click(timeout=4000)
+                        page.wait_for_timeout(700)
+                    except Exception:                    # noqa: BLE001
+                        pass
+                continue
+            return True
+        return False
+
     def _click_day(self, page, target: date) -> None:
         """คลิกวันในปฏิทิน — เลื่อนเดือนจนกว่าจะเห็นเดือนที่ต้องการ แล้วกดเลขวัน
 
@@ -599,18 +699,21 @@ class ShopeeAdapter(PlaywrightAdapter):
         want_iso = target.isoformat()
 
         panel = None
-        for _ in range(24):                              # ย้อนหลังได้ ~2 ปี
+        for _ in range(36):                              # เลื่อนได้ ~3 ปี ทั้งสองทาง
             panel = self._panel_for(page, target)
             if panel is not None:
                 break
-            if not _click_first(page, SEL["prev_month"], 4000):
+            # เดินไปทางที่ใกล้เป้าหมาย ไม่ใช่ถอยหลังอย่างเดียว
+            cur = self._panel_month(page)
+            forward = bool(cur and (target.year, target.month) > cur)
+            if not self._step_one_month(page, forward):
                 break
-            page.wait_for_timeout(700)
 
         if panel is None:
             raise AdapterError(
                 ErrorType.PARSE_ERROR,
-                f"เลื่อนปฏิทินไปหาเดือนของ {want_iso} ไม่ได้",
+                f"เลื่อนปฏิทินไปหาเดือนของ {want_iso} ไม่ได้ "
+                f"(หัวปฏิทินตอนนี้: {self._header_text(page)!r})",
             )
 
         # ⚠️ ปฏิทินไม่ใช่ <table> — ไม่มี td เลย ช่องวันเป็น span.eds-date-table__cell-inner
@@ -763,7 +866,7 @@ class ShopeeAdapter(PlaywrightAdapter):
                         status_key = k
                         break
 
-            notes = ["ค่าธรรมเนียม/settlement มีในไฟล์ Export แต่ยังไม่ได้ดึงตามที่กำหนดไว้"]
+            notes = []
             province = m.get(row, "province")
             if province and str(province).startswith("จังหวัด"):
                 notes.append('province ยังมีคำว่า "จังหวัด" นำหน้าตามไฟล์ต้นทาง')
@@ -777,29 +880,72 @@ class ShopeeAdapter(PlaywrightAdapter):
                 order_updated_at=m.parse_dt(m.get(row, "delivered_at"))
                                  or m.parse_dt(m.get(row, "shipped_at")),
                 paid_at=m.parse_dt(m.get(row, "paid_at")),
+                # ── เวลาแต่ละขั้น เดิมถูกยุบทิ้งใน order_updated_at ──
+                promised_ship_at=m.parse_dt(m.get(row, "promised_ship_at")),
+                shipped_at=m.parse_dt(m.get(row, "shipped_at")),
+                delivered_at=m.parse_dt(m.get(row, "delivered_at")),
+                completed_at=m.parse_dt(m.get(row, "completed_at")),
+                cancelled_at=m.parse_dt(m.get(row, "cancelled_at")),
+                settlement_date=m.parse_dt(m.get(row, "settlement_date")),
                 status_raw=str(status_raw) if status_raw is not None else None,
                 order_status=m.map_status(status_key),
                 payment_method=m.get(row, "payment_method"),
                 sku=m.to_text(m.get(row, "sku")),
+                parent_sku=m.to_text(m.get(row, "parent_sku")),
                 product_name=m.get(row, "product_name"),
                 variation=m.get(row, "variation"),
                 quantity=int(m.to_float(m.get(row, "quantity")) or 0) or None,
+                returned_qty=m.to_float(m.get(row, "returned_qty")),
                 item_price=m.to_float(m.get(row, "item_price")),
+                deal_price=m.to_float(m.get(row, "deal_price")),
+                # ยอดทั้งบรรทัดก่อนหักส่วนลด — ใช้เป็นน้ำหนักเฉลี่ยยอดออเดอร์ลงรายบรรทัด
+                net_price=m.to_float(m.get(row, "net_price")),
                 seller_discount=m.to_float(m.get(row, "seller_discount")),
                 platform_discount=m.to_float(m.get(row, "platform_discount")),
                 shipping_fee=m.to_float(m.get(row, "shipping_fee")),
+                # ── ส่วนลดที่เหลือ เปิดใช้ 2026-08-13 ────────────
+                # เก็บแยกช่องใครช่องมัน ห้ามบวกรวมเอง (ดูเหตุผลใน shopee.yaml)
+                seller_voucher=m.to_float(m.get(row, "seller_voucher")),
+                seller_coin_cashback=m.to_float(m.get(row, "seller_coin_cashback")),
+                seller_bundle_discount=m.to_float(m.get(row, "seller_bundle_discount")),
+                seller_tradein_bonus=m.to_float(m.get(row, "seller_tradein_bonus")),
+                platform_voucher=m.to_float(m.get(row, "platform_voucher")),
+                platform_bundle_discount=m.to_float(m.get(row, "platform_bundle_discount")),
+                coin_discount=m.to_float(m.get(row, "coin_discount")),
+                payment_discount=m.to_float(m.get(row, "payment_discount")),
+                tradein_discount=m.to_float(m.get(row, "tradein_discount")),
+                tradein_bonus=m.to_float(m.get(row, "tradein_bonus")),
+                voucher_total=m.to_float(m.get(row, "voucher_total")),
                 # ── ค่าธรรมเนียม เปิดใช้ 2026-08-11 ──────────────
                 # เป็นค่าที่ Shopee หักจากผู้ขาย เก็บเป็นเลขบวกตามที่ไฟล์ให้มา
                 commission_fee=m.to_float(m.get(row, "commission_fee")),
                 transaction_fee=m.to_float(m.get(row, "transaction_fee")),
                 service_fee=m.to_float(m.get(row, "service_fee")),
+                installation_fee_buyer=m.to_float(m.get(row, "installation_fee_buyer")),
+                installation_fee_actual=m.to_float(m.get(row, "installation_fee_actual")),
+                estimated_shipping_fee=m.to_float(m.get(row, "estimated_shipping_fee")),
+                return_shipping_fee=m.to_float(m.get(row, "return_shipping_fee")),
                 shipping_carrier=m.get(row, "shipping_carrier"),
+                shipping_method=m.get(row, "shipping_method"),
                 tracking_no=m.to_text(m.get(row, "tracking_no")),
+                # ทั้งคู่เป็นค่าระดับออเดอร์ ซ้ำทุกบรรทัด — ห้ามบวกข้ามบรรทัด
+                item_paid_by_buyer=m.to_float(m.get(row, "item_paid_by_buyer")),
                 total_amount=m.to_float(m.get(row, "total_amount")),
                 buyer_username=m.get(row, "buyer_username"),
                 province=province,               # Shopee ไม่ mask จังหวัด ใช้ได้เลย
+                district=m.get(row, "district"),
+                postcode=m.to_text(m.get(row, "postcode")),
+                country=m.get(row, "country"),
+                order_type=m.get(row, "order_type"),
+                fulfilled_by_platform=m.to_text(m.get(row, "fulfilled_by_platform")),
+                owned_by_platform=m.to_text(m.get(row, "owned_by_platform")),
+                in_bundle_deal=m.to_text(m.get(row, "in_bundle_deal")),
+                hot_listing=m.to_text(m.get(row, "hot_listing")),
+                tax_invoice_requested=m.to_text(m.get(row, "tax_invoice_requested")),
+                tax_invoice_type=m.get(row, "tax_invoice_type"),
                 cancel_reason=m.get(row, "cancel_reason"),
                 return_status=m.to_text(m.get(row, "return_status")),
+                seller_note=m.get(row, "seller_note"),
                 notes=" / ".join(notes),
                 fetched_at=datetime.now(),
             ))
