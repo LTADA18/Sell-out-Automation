@@ -65,7 +65,11 @@ shops:
     adapter: playwright
     display_name: "toolsdee1"
     account_key: TIKTOK_02
-    enabled: true
+    # ⏸️ ปิดชั่วคราว 2026-08-22 — session หมดอายุ ยังไม่ได้ล็อกอินใหม่
+    #    เจ้าของงานสั่งให้ข้ามร้านนี้เฉพาะวันนี้ แล้วส่งอีเมลด้วยร้านที่เหลือ
+    #    ระบุว่าเป็น "กรณีพิเศษ" → ต้องเปิดกลับเป็น true ทันทีที่ล็อกอินเสร็จ
+    enabled: false
+    skip_reason: "รอล็อกอินใหม่ — เจ้าของงานสั่งข้ามเฉพาะรอบ 2026-08-22"
 
   - shop_id: tiktok_03
     platform: tiktok
@@ -97,7 +101,9 @@ shops:
     adapter: playwright
     display_name: "Metool"
     account_key: TIKTOK_06
-    enabled: true
+    # ⏸️ ปิดชั่วคราว 2026-08-22 — เหตุผลเดียวกับ tiktok_02 ข้างบน
+    enabled: false
+    skip_reason: "รอล็อกอินใหม่ — เจ้าของงานสั่งข้ามเฉพาะรอบ 2026-08-22"
 
   # ── Shopee: 10 ร้าน จาก 7 บัญชี ───────────────────────────
   #
