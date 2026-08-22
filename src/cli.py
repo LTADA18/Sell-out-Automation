@@ -63,6 +63,10 @@ def cli() -> None:
 @click.option("--to", "date_to_s", help="ใช้คู่กับ --from")
 @click.option("--skip-if-done", is_flag=True,
               help="ถ้ารอบของวันนี้สำเร็จไปแล้วให้ออกทันที (ใช้กับ trigger ตอนเปิดเครื่อง)")
+# ⚠️ ค่าเริ่มต้น 0 = ไม่รอ (พฤติกรรมเดิม) — รอบรายวันส่งค่ามาเองผ่าน run_daily.ps1
+#    ดูเหตุผลเต็มในคอมเมนต์ของ run_lock() ใน src/core/runner.py
+@click.option("--wait-lock", "wait_lock", type=int, default=0,
+              help="รอล็อกได้นานสุดกี่นาทีถ้ามีรอบอื่นถืออยู่ (0 = ไม่รอ ออกทันที)")
 def run(
     all_shops: bool,
     shop: str | None,
@@ -71,6 +75,7 @@ def run(
     date_from_s: str | None,
     date_to_s: str | None,
     skip_if_done: bool,
+    wait_lock: int,
 ) -> None:
     """ดึงข้อมูลแล้วออก Excel"""
     if not any([all_shops, shop, platform]):
@@ -103,10 +108,14 @@ def run(
         if stale:
             click.echo(f"⚠️  เจอแถวค้างสถานะ RUNNING {stale} แถว จากรอบก่อนที่ไม่จบ — ปรับเป็น FAILED แล้ว")
         try:
-            with run_lock(PROJECT_ROOT / cfg.settings.paths.lock_file):
+            with run_lock(PROJECT_ROOT / cfg.settings.paths.lock_file,
+                          wait_min=wait_lock):
                 results = Runner(cfg, store).run_many(shops, run_date)
         except AlreadyRunningError as exc:
             click.echo(f"❌ {exc}", err=True)
+            if wait_lock:
+                click.echo(f"   (รอล็อกมาแล้ว {wait_lock} นาที ยังไม่ว่าง — "
+                           f"ตัวที่ถือล็อกน่าจะค้าง ดู pid ข้างบน)", err=True)
             sys.exit(2)
 
     line = summarize(results)

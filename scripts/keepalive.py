@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,7 @@ from src.core.logging_setup import get_logger, setup_logging  # noqa: E402
 from src.core.models import AdapterError                 # noqa: E402
 from src.core.busy import busy_reason                      # noqa: E402
 from src.core.runner import AlreadyRunningError, run_lock  # noqa: E402
+from src.core.status_store import StatusStore             # noqa: E402
 
 log = get_logger()
 
@@ -146,6 +147,27 @@ def main() -> int:
             print(f"อีก {mins_to_daily:.0f} นาทีจะถึงรอบดึง {args.daily_at} — "
                   f"ข้ามรอบนี้ ไม่ไปแย่งล็อก")
             return 0
+
+        # ⚠️ ตัวกันข้างบนมองไปข้างหน้าอย่างเดียว จึงพลาดกรณีที่เกิดจริง
+        #    2026-08-22: เครื่องตื่นสายตอน 08:58 (รอบดึงตั้งไว้ 08:30)
+        #    ตอนนั้น mins_to_daily ติดลบ ตัวกันไม่ทำงาน keepalive จึงวิ่งเต็มรอบ
+        #    แล้วคว้า run_lock ไว้ พอรอบดึงที่ตื่นมาพร้อมกันจะเริ่มก็เจอล็อกไม่ว่าง
+        #    ออกทันทีด้วย exit 2 — วันนั้นไม่ได้ดึงข้อมูลเลยสักร้าน
+        #
+        #    กติกาที่ถูกคือ "รอบดึงของวันนี้มาก่อนเสมอ" ถ้าเลยเวลารอบดึงมาแล้ว
+        #    แต่ยังไม่มีร้านไหนดึงสำเร็จของวันนี้เลย แปลว่ารอบดึงยังค้างคิวอยู่
+        #    keepalive ต้องหลบให้ ไม่ใช่ไปแย่งล็อกตัดหน้า
+        #
+        #    ไม่กระทบการใช้งานปกติ: วันที่รอบดึงทำงานแล้ว เงื่อนไขนี้เป็นเท็จทันที
+        #    keepalive รอบ 10:00 / 16:00 / 22:00 จึงทำงานได้ตามเดิม
+        #    และ preflight ที่เรียกด้วย --guard-min 0 ก็ข้ามด่านนี้ไปเหมือนกัน
+        if args.guard_min > 0 and mins_to_daily < 0:
+            _cfg = load_config()
+            with StatusStore(PROJECT_ROOT / _cfg.settings.paths.db_path) as st:
+                if not st.has_successful_run(date.today().isoformat()):
+                    print(f"เลยเวลารอบดึง {args.daily_at} มาแล้วแต่วันนี้ยังไม่มีร้านไหน"
+                          f"ดึงสำเร็จ — รอบดึงน่าจะกำลังจะเริ่ม ข้ามรอบนี้ ไม่ไปแย่งล็อก")
+                    return 0
     except ValueError:
         pass                                             # รูปแบบเวลาเพี้ยน ก็ทำงานต่อตามปกติ
 

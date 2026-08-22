@@ -66,6 +66,16 @@ else               { $cliArgs += "--all" }
 if ($Date) { $cliArgs += @("--date", $Date) }
 if ($SkipIfDone) { $cliArgs += "--skip-if-done" }
 
+# ⚠️ รอล็อกแทนที่จะยอมแพ้ทันที (เจอจริง 2026-08-22 เสียยอดทั้งวัน)
+#    เครื่องเป็นโน้ตบุ๊ก วันนั้นตื่นสายตอน 08:58 งานที่ค้างไว้ยิงพร้อมกันทั้ง
+#    รอบดึงและ KeepAlive (ตั้ง StartWhenAvailable ทั้งคู่) KeepAlive คว้าล็อก
+#    ไปก่อน รอบดึงเจอล็อกไม่ว่างแล้วออกทันทีด้วย exit 2 — ไม่ได้ดึงเลยสักร้าน
+#    ทั้งที่ตัวที่ถือล็อกใช้เวลาแค่ไม่กี่นาทีแล้วปล่อยเอง
+#
+#    20 นาทีพอสำหรับ keepalive ครบทุกร้าน (รอบเต็มใช้ราว 8-10 นาที)
+#    ถ้าเกินนั้นแปลว่าตัวที่ถือล็อกค้างจริง ค่อยยอมแพ้แล้วรายงาน exit 2 ตามเดิม
+$cliArgs += @("--wait-lock", "20")
+
 $started = Get-Date
 Write-Host "เริ่มรอบ $($started.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture))" -ForegroundColor Cyan
 

@@ -70,8 +70,27 @@ def _lock_owner_pid(lock_path: Path) -> int:
         return -1
 
 
+def _try_take_lock(lock_path: Path) -> str | None:
+    """ลองยึด lock หนึ่งครั้ง — คืน None ถ้ายึดได้ / คืนข้อความเหตุผลถ้ายังยึดไม่ได้"""
+    if not lock_path.exists():
+        return None
+    age = time.time() - lock_path.stat().st_mtime
+    owner = _lock_owner_pid(lock_path)
+
+    if not _pid_alive(owner):
+        log.warning("stale_lock_taken_over", lock=str(lock_path),
+                    dead_pid=owner, age_sec=round(age), reason="เจ้าของ lock ตายแล้ว")
+        return None
+    if age >= 6 * 3600:
+        log.warning("stale_lock_taken_over", lock=str(lock_path),
+                    dead_pid=owner, age_sec=round(age), reason="lock เก่าเกิน 6 ชม.")
+        return None
+    return (f"มีรอบที่กำลังรันอยู่จริง (pid {owner}, lock อายุ {age / 60:.0f} นาที) "
+            f"— {lock_path}")
+
+
 @contextmanager
-def run_lock(lock_path: Path) -> Iterator[None]:
+def run_lock(lock_path: Path, wait_min: int = 0) -> Iterator[None]:
     """กันรันซ้อน — รอบก่อนยังไม่จบ ห้ามเริ่มรอบใหม่
 
     ยึด lock คืนได้ 2 กรณี:
@@ -80,23 +99,31 @@ def run_lock(lock_path: Path) -> Iterator[None]:
 
     ข้อ 1 สำคัญมากสำหรับรอบตี 6 — ถ้าไม่มี ไฟดับกลางรอบทีเดียว
     วันถัดไปจะรันไม่ได้เลยจนกว่าจะมีคนมาลบไฟล์เอง (เจอจริง 2026-08-04)
+
+    wait_min = รอล็อกได้นานสุดกี่นาทีก่อนยอมแพ้ (0 = ไม่รอ ออกทันทีแบบเดิม)
+
+    ⚠️ ทำไมต้องมีตัวรอ (เจอจริง 2026-08-22 เสียยอดทั้งวัน)
+       เครื่องเป็นโน้ตบุ๊ก วันนั้นตื่นสายตอน 08:58 งานที่ค้างไว้จึงยิงพร้อมกัน
+       ทั้งรอบดึงและ KeepAlive (ทั้งคู่ตั้ง StartWhenAvailable) KeepAlive คว้า
+       lock ไปก่อน รอบดึงเจอล็อกไม่ว่างแล้ว "ยอมแพ้ทันที" ออกด้วย exit 2
+       ผลคือวันนั้นไม่ได้ดึงข้อมูลเลยสักร้าน ทั้งที่ตัวที่ถือล็อกใช้เวลาแค่ไม่กี่นาที
+       และจะปล่อยเองอยู่แล้ว — รออีกนิดเดียวก็ได้ทำงาน
+
+       ค่าเริ่มต้นยังเป็น 0 โดยตั้งใจ งานอย่าง backfill ที่คนสั่งเองควรบอกทันที
+       ว่ามีรอบอื่นรันอยู่ ไม่ใช่ค้างรอเงียบ ๆ ให้คนนั่งงง
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if lock_path.exists():
-        age = time.time() - lock_path.stat().st_mtime
-        owner = _lock_owner_pid(lock_path)
 
-        if not _pid_alive(owner):
-            log.warning("stale_lock_taken_over", lock=str(lock_path),
-                        dead_pid=owner, age_sec=round(age), reason="เจ้าของ lock ตายแล้ว")
-        elif age < 6 * 3600:
-            raise AlreadyRunningError(
-                f"มีรอบที่กำลังรันอยู่จริง (pid {owner}, lock อายุ {age / 60:.0f} นาที) "
-                f"— {lock_path}"
-            )
-        else:
-            log.warning("stale_lock_taken_over", lock=str(lock_path),
-                        dead_pid=owner, age_sec=round(age), reason="lock เก่าเกิน 6 ชม.")
+    deadline = time.time() + max(0, wait_min) * 60
+    while True:
+        why = _try_take_lock(lock_path)
+        if why is None:
+            break
+        if time.time() >= deadline:
+            raise AlreadyRunningError(why)
+        left = (deadline - time.time()) / 60
+        log.info("waiting_for_lock", reason=why[:80], minutes_left=round(left, 1))
+        time.sleep(20)
 
     lock_path.write_text(f"{os.getpid()} {datetime.now().isoformat()}", encoding="utf-8")
     try:

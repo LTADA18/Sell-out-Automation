@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import os
+
 import pytest
 
 from src.core.models import ErrorType, RunStatus
@@ -105,6 +107,38 @@ def test_lock_blocks_second_run(tmp_path):
             with run_lock(lock):
                 pass
     assert not lock.exists(), "lock ต้องถูกลบเมื่อจบรอบ"
+
+
+def test_lock_waits_instead_of_giving_up(tmp_path):
+    """รอบดึงต้องรอล็อกได้ ไม่ใช่ยอมแพ้ทันที
+
+    เจอจริง 2026-08-22: เครื่องตื่นสายตอน 08:58 รอบดึงกับ KeepAlive จึงยิง
+    พร้อมกัน KeepAlive คว้าล็อกไปก่อน รอบดึงเจอล็อกไม่ว่างแล้วออกทันที
+    ผลคือทั้งวันไม่ได้ดึงข้อมูลเลยสักร้าน ทั้งที่ตัวที่ถือล็อกจะปล่อยเองในไม่กี่นาที
+    """
+    import threading
+    import time as _time
+
+    lock = tmp_path / "run.lock"
+    lock.write_text(f"{os.getpid()} holder", encoding="utf-8")   # เจ้าของยังมีชีวิต
+
+    threading.Timer(1.0, lambda: lock.unlink(missing_ok=True)).start()
+
+    started = _time.time()
+    with run_lock(lock, wait_min=1):
+        waited = _time.time() - started
+    assert waited >= 1.0, "ต้องรอจริง ไม่ใช่ยึดทับตอนเจ้าของยังถืออยู่"
+
+
+def test_lock_without_wait_still_fails_fast(tmp_path):
+    """ค่าเริ่มต้นต้องไม่รอ — backfill ที่คนสั่งเองต้องรู้ทันทีว่ามีรอบอื่นรันอยู่
+    ไม่ใช่ค้างเงียบให้คนนั่งงง
+    """
+    lock = tmp_path / "run.lock"
+    lock.write_text(f"{os.getpid()} holder", encoding="utf-8")
+    with pytest.raises(AlreadyRunningError):
+        with run_lock(lock):
+            pass
 
 
 def test_lock_released_even_when_run_crashes(tmp_path):
