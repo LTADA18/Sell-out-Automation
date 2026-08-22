@@ -21,7 +21,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ads.parser import parse_shopee_ads                # noqa: E402
+from src.ads.parser import parse_shopee_ads, parse_tiktok_ads   # noqa: E402
+from src.core.config import load_config                     # noqa: E402
 from src.core.logging_setup import setup_logging           # noqa: E402
 
 
@@ -41,17 +42,29 @@ def main() -> int:
 
     setup_logging(PROJECT_ROOT / "logs", f"ads_{args.shop}")
 
+    platform = load_config().shop(args.shop).platform
+    if platform not in ("shopee", "tiktok"):
+        ap.error(f"ยังไม่รองรับ {platform} — ตอนนี้มีแค่ shopee กับ tiktok")
+
     if args.parse_only:
         path = Path(args.parse_only)
     else:
         if not (args.d_from and args.d_to):
             ap.error("ต้องใส่ --from กับ --to (หรือใช้ --parse-only)")
-        from src.ads.shopee_ads import ShopeeAdsFetcher   # import ตอนใช้จริง
-        with ShopeeAdsFetcher(args.shop) as f:
-            path = f.fetch(_d(args.d_from), _d(args.d_to), timeout_sec=args.timeout)
+        # import ตอนใช้จริง โมดูลพวกนี้เปิด Playwright ซึ่งหนัก
+        if platform == "shopee":
+            from src.ads.shopee_ads import ShopeeAdsFetcher
+            with ShopeeAdsFetcher(args.shop) as f:
+                path = f.fetch(_d(args.d_from), _d(args.d_to),
+                               timeout_sec=args.timeout)
+        else:
+            from src.ads.tiktok_ads import TikTokAdsFetcher
+            with TikTokAdsFetcher(args.shop) as f:
+                path = f.fetch(_d(args.d_from), _d(args.d_to))
         print(f"✅ ได้ไฟล์: {path.name}")
 
-    rows = parse_shopee_ads(path, shop_id=args.shop)
+    rows = (parse_shopee_ads(path, shop_id=args.shop) if platform == "shopee"
+            else parse_tiktok_ads(path, shop_id=args.shop))
     print(f"แปลงได้ {len(rows)} แถว")
 
     spend = sum(r["expense_thb"] for r in rows if r["expense_thb"])

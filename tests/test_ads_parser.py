@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.ads.parser import find_header_row, parse_shopee_ads, to_number
+from src.ads.parser import (find_header_row, parse_shopee_ads,
+                            parse_tiktok_ads, to_number)
 
 HEAD = (
     "รายงานโฆษณา CPC ทั้งหมด - Shopee ประเทศไทย\n"
@@ -132,3 +133,56 @@ def test_gmv_max_row_is_kept(tmp_path):
     assert len(gmv_max) == 1
     assert gmv_max[0]["ads_type"] is None
     assert gmv_max[0]["expense_thb"] > 0
+
+
+# ── TikTok ───────────────────────────────────────────────────
+TIKTOK_ROWS = [
+    ["ตามวัน", "ต้นทุน", "คำสั่งซื้อ SKU (ร้านค้าปัจจุบัน)",
+     "ค่าใช้จ่ายต่อคำสั่งซื้อ (ร้านค้าปัจจุบัน)",
+     "รายได้ขั้นต้น (ร้านค้าปัจจุบัน)", "ROI (ร้านค้าปัจจุบัน)", "สกุลเงิน"],
+    ["2026-08-15 00:00:00", "667.81", 26, "25.68", "6805.94", "10.19", "THB"],
+    ["2026-08-16 00:00:00", "400.00", 32, "12.50", "25938.11", "64.85", "THB"],
+    # แถวรวมทั้งช่วง — ใช้ "-" ในช่องวันที่ ต้องถูกทิ้ง
+    ["-", "1067.81", 58, "18.41", "32744.05", "30.66", "THB"],
+]
+
+
+def _tiktok_xlsx(tmp_path):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    for r in TIKTOK_ROWS:
+        ws.append(r)
+    p = tmp_path / "Campaign overview data 20260815 - 20260816.xlsx"
+    wb.save(p)
+    return p
+
+
+def test_tiktok_drops_the_grand_total_row(tmp_path):
+    """แถวรวมท้ายไฟล์ต้องถูกทิ้ง ไม่งั้นยอดเบิ้ล
+
+    เจอจริง 2026-08-22: ไฟล์ 8 วันมี 9 แถว แถวที่ 9 คือยอดรวม
+    บวกทั้งไฟล์ได้ 10,058.70 ซึ่งเป็น 2 เท่าของจริง (5,029.35)
+    นี่คือบั๊กที่ไม่มีอะไรเตือน ตัวเลขดูสมเหตุสมผลทุกอย่าง
+    """
+    rows = parse_tiktok_ads(_tiktok_xlsx(tmp_path), shop_id="tiktok_01")
+    assert len(rows) == 2, "แถวรวมต้องไม่หลุดเข้ามา"
+    total = sum(r["expense_thb"] for r in rows)
+    assert total == pytest.approx(1067.81), "ยอดต้องเท่ากับแถวรวมที่ไฟล์บอก ไม่ใช่ 2 เท่า"
+
+
+def test_tiktok_parses_datetime_string_dates(tmp_path):
+    """วันที่มาเป็นสตริง "2026-08-15 00:00:00" ไม่ใช่ชนิดวันที่ของ Excel"""
+    rows = parse_tiktok_ads(_tiktok_xlsx(tmp_path), shop_id="tiktok_01")
+    assert str(rows[0]["period_from"]) == "2026-08-15"
+    # 1 แถว = 1 วัน ช่วงต้องเป็นวันเดียว ไม่ใช่ช่วงที่ขอทั้งก้อน
+    assert rows[0]["period_from"] == rows[0]["period_to"]
+
+
+def test_tiktok_missing_columns_are_none_with_reason(tmp_path):
+    """impression/คลิก/คีย์เวิร์ด ไม่มีในรายงานนี้ ต้องเป็น None พร้อมเหตุผล"""
+    r = parse_tiktok_ads(_tiktok_xlsx(tmp_path), shop_id="tiktok_01")[0]
+    for f in ("impressions", "clicks", "keyword", "ad_name"):
+        assert r[f] is None
+    assert any("impressions" in f for f in r["dq_flags"])

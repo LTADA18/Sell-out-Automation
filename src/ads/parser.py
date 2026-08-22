@@ -154,3 +154,98 @@ NUMERIC = {
     "conv_rate", "cost_per_conv_thb", "items_sold", "gmv_thb",
     "direct_gmv_thb", "expense_thb", "roas", "acos",
 }
+
+# ─────────────────────────────────────────────────────────────
+#  TikTok — โครงไฟล์คนละแบบกับ Shopee
+#    Shopee : CSV · 1 แถว = 1 โฆษณา · ยอดรวมทั้งช่วง
+#    TikTok : Excel · 1 แถว = 1 วัน · ยอดรวมระดับร้าน
+#  จึงแยกฟังก์ชันกัน ไม่ยัดรวมด้วย if platform== เพราะจะอ่านยากและพลาดง่าย
+# ─────────────────────────────────────────────────────────────
+TIKTOK_MAP_FILE = PROJECT_ROOT / "config" / "column_maps" / "tiktok_ads.yaml"
+
+
+def _day_from_cell(raw: Any) -> date | None:
+    """คอลัมน์ "ตามวัน" — TikTok ส่งมาเป็น *สตริง* "2026-08-15 00:00:00"
+
+    ⚠️ ไม่ใช่ชนิดวันที่ของ Excel ทั้งที่หน้าตาเหมือนวันที่ ต้องแปลงเอง
+       และมีเวลา 00:00:00 ต่อท้ายเสมอ ถ้าลองแค่ "%Y-%m-%d" จะพังทุกแถว
+       (เจอจริง 2026-08-22 — แปลงได้ 9 แถวแต่ period_from เป็น None หมด)
+       รับรูปแบบอื่นไว้ด้วยเผื่อ TikTok เปลี่ยนทีหลัง
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    s = str(raw).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y%m%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def parse_tiktok_ads(path: Path, shop_id: str) -> list[dict]:
+    """อ่านไฟล์ Campaign overview ของ TikTok → แถวพร้อมโหลดขึ้นฐาน"""
+    import openpyxl
+
+    cfg = yaml.safe_load(TIKTOK_MAP_FILE.read_text(encoding="utf-8"))
+    fields: dict[str, list[str]] = cfg["fields"]
+
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb.worksheets[0]
+    if cfg["file"].get("needs_reset_dimensions"):
+        # ไฟล์ไม่ประกาศ dimension — ถ้าไม่เรียก openpyxl จะเห็นแค่คอลัมน์เดียว
+        ws.reset_dimensions()
+
+    it = ws.iter_rows(values_only=True)
+    header = [str(c).strip() if c is not None else "" for c in next(it)]
+    pos = {h: i for i, h in enumerate(header)}
+    missing = [f for f, names in fields.items() if not any(n in pos for n in names)]
+
+    out: list[dict] = []
+    for raw in it:
+        if raw is None or not any(c is not None and str(c).strip() for c in raw):
+            continue
+        rec: dict[str, Any] = {
+            "platform": "tiktok",
+            "shop_scope": shop_id,
+            "source_file": path.name,
+            "captured_dd_mm_yyyy": date.today(),
+            "date_collection_method": "per_day:campaign_overview",
+        }
+        for field, names in fields.items():
+            col = next((pos[n] for n in names if n in pos), None)
+            val = raw[col] if col is not None and col < len(raw) else None
+            rec[field] = to_number(val) if field in NUMERIC else to_text(val)
+
+        day_cell = raw[pos["ตามวัน"]] if "ตามวัน" in pos else None
+
+        # ⛔ แถวสุดท้ายของไฟล์เป็น "แถวรวมทั้งช่วง" ใช้ "-" ในช่องวันที่
+        #    ต้องทิ้ง ไม่งั้นยอดจะเบิ้ลทันทีเมื่อเอาไปบวกกัน
+        #    (พิสูจน์แล้ว 2026-08-22: ต้นทุนแถวนั้น 5,029.35 = ผลรวม 8 วันพอดี
+        #     ตอนแรกบวกทั้งไฟล์ได้ 10,058.70 ซึ่งเป็น 2 เท่าของจริง)
+        #
+        #    ⚠️ ตัดเฉพาะแถวที่ช่องวันที่เป็น "-" เท่านั้น ห้ามตัดทุกแถวที่
+        #       อ่านวันที่ไม่ได้ — แถวที่วันที่เพี้ยนจริงต้องหลุดเข้ามาแล้วขึ้น
+        #       dq_flags ให้คนเห็น ไม่ใช่หายเงียบ
+        if str(day_cell).strip() in ("-", "--", "รวม", "ทั้งหมด", "Total"):
+            continue
+
+        # 1 แถว = 1 วัน → ช่วงของแถวนี้คือวันเดียว ไม่ใช่ช่วงที่ขอทั้งก้อน
+        day = _day_from_cell(day_cell)
+        rec["period_from"] = rec["period_to"] = day
+        rec.pop("period_day", None)
+
+        flags = [f"ไม่มีคอลัมน์ {f} ในไฟล์" for f in missing]
+        for f in cfg.get("unmapped", []):
+            rec.setdefault(f, None)
+            flags.append(f"{f} ไม่มีในรายงานนี้")
+        if day is None:
+            flags.append("อ่านวันที่จากคอลัมน์ 'ตามวัน' ไม่ได้")
+        rec["dq_flags"] = flags
+        out.append(rec)
+
+    return out

@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────
+#  TikTok Shop — ไฟล์ "Campaign overview data" (7 คอลัมน์)
+#  อ้างอิงจากไฟล์จริง: Campaign overview data 20260815 - 20260822.xlsx
+#  (tiktok_01 powerstool, ดึงเมื่อ 2026-08-22)
+#
+#  ปลายทางคือ intel.mp_ads_raw เหมือนฝั่ง Shopee
+# ─────────────────────────────────────────────────────────────
+
+export_flow:
+  ads_url: "{base}/ads"          # เด้งไป /ads-creation/dashboard เอง
+  # ⚠️ ตั้งช่วงวันที่ผ่าน URL ไม่ได้ ต้องพิมพ์ลงช่องในหน้า
+  #    (ต่างจาก Shopee ที่ใช้ URL ได้ — อย่าเอาวิธีข้ามเจ้ากัน)
+  date_by_url: false
+  start_input: 'input[placeholder="วันที่เริ่มต้น"]'
+  end_input:   'input[placeholder="วันที่สิ้นสุด"]'
+  # ไม่มีคิว กดแล้วได้ไฟล์เลย ต่างจาก Shopee
+  async_export: false
+  download_button: "button:has(svg.arco-icon-download)"
+  filename_pattern: "Campaign overview data <YYYYMMDD> - <YYYYMMDD>.xlsx"
+  export_format: Excel
+
+file:
+  sheet: Sheet1
+  header_row: 1
+  data_start_row: 2
+  # ไฟล์ไม่ประกาศ dimension ต้อง ws.reset_dimensions() ไม่งั้น openpyxl เห็น 1 คอลัมน์
+  # (อาการเดียวกับไฟล์ออเดอร์ของ Lazada)
+  needs_reset_dimensions: true
+
+# ─────────────────────────────────────────────────────────────
+#  จับคู่คอลัมน์ → ช่องใน intel.mp_ads_raw
+#
+#  ⚠️ ไฟล์นี้เป็น "ยอดรวมระดับร้าน รายวัน" ต่างจาก Shopee ที่เป็นรายโฆษณา
+#     1 แถว = 1 วัน ไม่ใช่ 1 โฆษณา จึงไม่มี ad_name / campaign_name
+#     period_from = period_to = วันของแถวนั้น
+# ─────────────────────────────────────────────────────────────
+fields:
+  period_day:           ["ตามวัน"]
+  expense_thb:          ["ต้นทุน"]
+  conversions:          ["คำสั่งซื้อ SKU (ร้านค้าปัจจุบัน)"]
+  cost_per_conv_thb:    ["ค่าใช้จ่ายต่อคำสั่งซื้อ (ร้านค้าปัจจุบัน)"]
+  gmv_thb:              ["รายได้ขั้นต้น (ร้านค้าปัจจุบัน)"]
+  roas:                 ["ROI (ร้านค้าปัจจุบัน)"]
+  currency:             ["สกุลเงิน"]
+
+# ไม่มีในไฟล์นี้เลย — ต้องเป็น None ตามกฎเหล็กข้อ 1 ห้ามเดาแทน
+# ถ้าอยากได้ต้องไปที่ TikTok Ads Manager (ads.tiktok.com) ซึ่งเป็นคนละระบบ
+unmapped:
+  - ad_name
+  - campaign_name
+  - keyword
+  - match_type
+  - ads_type
+  - impressions
+  - clicks
+  - ctr
+  - conv_rate
+  - acos
+  - items_sold
+  - direct_conversions
+  - direct_gmv_thb
+
+quirks:
+  ROI ไม่ใช่ ROAS เป๊ะ ๆ: >
+    TikTok เรียกคอลัมน์นี้ว่า ROI และคิดจาก "รายได้ขั้นต้น / ต้นทุน"
+    ซึ่งนิยามเดียวกับ ROAS ของ Shopee/Lazada จึง map เข้าช่อง roas ได้
+    แต่ถ้าวันหนึ่ง TikTok เปลี่ยนนิยาม ต้องมาทบทวนตรงนี้
+
+  หัวคอลัมน์มีวงเล็บ (ร้านค้าปัจจุบัน) ต่อท้าย: >
+    ชื่อคอลัมน์จริงคือ "คำสั่งซื้อ SKU (ร้านค้าปัจจุบัน)" ไม่ใช่ "คำสั่งซื้อ SKU"
+    วงเล็บนี้บอกว่านับเฉพาะร้านที่กำลังดูอยู่ ไม่ใช่ทุกร้านในบัญชี
+    ตัดวงเล็บออกตอนเทียบชื่อไม่ได้ เพราะจะไปชนกับคอลัมน์อื่นที่อาจเพิ่มมาทีหลัง
+
+  1 แถวเท่ากับ 1 วัน: >
+    ต่างจาก Shopee ที่ 1 แถวเท่ากับ 1 โฆษณา และเป็นยอดรวมทั้งช่วง
+    ตอนโหลดขึ้น mp_ads_raw ต้องตั้ง period_from = period_to = วันของแถวนั้น
+    ไม่ใช่ช่วงที่ขอ ไม่งั้นจะได้แถวซ้ำคีย์กันทั้งช่วง
