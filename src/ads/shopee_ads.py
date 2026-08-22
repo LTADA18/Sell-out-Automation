@@ -119,7 +119,7 @@ class ShopeeAdsFetcher:
         return None
 
     def _wait_for_file(self, page, d_from: date, d_to: date,
-                       timeout_sec: int = 600) -> str:
+                       timeout_sec: int = 600, hint: str | None = None) -> str:
         """รอจนไฟล์ของช่วงที่ขอโผล่ในประวัติและกดโหลดได้
 
         ⚠️ ชื่อไฟล์ Shopee มีแค่ช่วงวันที่ ไม่มีเวลา — ขอช่วงเดิมซ้ำได้ชื่อเดิมเป๊ะ
@@ -137,8 +137,12 @@ class ShopeeAdsFetcher:
                 log.info("shopee_ads_history_top", shop_id=self.shop.shop_id,
                          name=top[:70], total=len(names))
                 last = top
-            for n in names:
-                if want in n and self._row_download_button(page, n) is not None:
+            # ⚠️ ประวัติมีไฟล์ของหลายรายงานปนกัน และถ้าขอช่วงเดิมทุกไฟล์จะมี
+            #    ช่วงวันที่เหมือนกันหมด กรองด้วยวันที่อย่างเดียวจึงหยิบผิดไฟล์ได้
+            #    (เจอจริง 2026-08-22: ขอ all_ads แต่ได้ไฟล์ keyword ที่ว่างเปล่า)
+            match = [n for n in names if want in n and (not hint or hint in n)]
+            for n in match:
+                if self._row_download_button(page, n) is not None:
                     return n
         raise AdapterError(
             ErrorType.TIMEOUT,
@@ -147,7 +151,13 @@ class ShopeeAdsFetcher:
         )
 
     # ── ตัวหลัก ─────────────────────────────────────────────
-    def fetch(self, d_from: date, d_to: date, timeout_sec: int = 600) -> Path:
+    def fetch(self, d_from: date, d_to: date, timeout_sec: int = 600,
+              report: str = "all_ads") -> Path:
+        """report = all_ads | keyword | keyword_rank (ดู reports ใน shopee_ads.yaml)"""
+        spec = self.flow["reports"].get(report)
+        if spec is None:
+            raise ValueError(f"ไม่รู้จักรายงาน {report!r} — "
+                             f"มีให้เลือก {list(self.flow['reports'])}")
         page = self.adapter._open_page(headed=False)
         url = self._ads_url(d_from, d_to)
         page.goto(url, wait_until="domcontentloaded", timeout=90_000)
@@ -173,18 +183,23 @@ class ShopeeAdsFetcher:
                 f"แต่ URL กลายเป็น {page.url[-90:]!r} · หยุดก่อนเพราะจะได้ข้อมูลผิดช่วง",
             )
 
+        # เมนูดาวน์โหลดให้รายการตามแท็บที่เปิดอยู่ ต้องเข้าแท็บให้ถูกก่อน
+        page.locator(f'text="{spec["tab"]}"').first.click(timeout=15_000)
+        page.wait_for_timeout(8000)
+
         log.info("shopee_ads_request", shop_id=self.shop.shop_id,
-                 period=_stamp(d_from, d_to))
+                 period=_stamp(d_from, d_to), report=report, tab=spec["tab"])
         page.locator(self.flow["download_button"]).first.click(timeout=15_000)
         page.wait_for_timeout(3500)
-        page.locator(f'text="{self.flow["menu_ads_data"]}"').first.click(timeout=15_000)
+        page.locator(f'text="{spec["menu_item"]}"').first.click(timeout=15_000)
         page.wait_for_timeout(6000)
 
         # เข้าคิวแล้ว ไปรอที่แผงประวัติ
         page.locator(self.flow["history_icon"]).first.click(timeout=15_000)
         page.wait_for_timeout(6000)
 
-        name = self._wait_for_file(page, d_from, d_to, timeout_sec)
+        name = self._wait_for_file(page, d_from, d_to, timeout_sec,
+                                   hint=spec.get("filename_hint"))
         log.info("shopee_ads_ready", shop_id=self.shop.shop_id, file=name[:70])
 
         btn = self._row_download_button(page, name)

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.ads.parser import (find_header_row, parse_shopee_ads,
-                            parse_tiktok_ads, to_number)
+from src.ads.parser import (find_header_row, parse_lazada_ads,
+                            parse_shopee_ads, parse_tiktok_ads, to_number)
 
 HEAD = (
     "รายงานโฆษณา CPC ทั้งหมด - Shopee ประเทศไทย\n"
@@ -185,4 +185,64 @@ def test_tiktok_missing_columns_are_none_with_reason(tmp_path):
     r = parse_tiktok_ads(_tiktok_xlsx(tmp_path), shop_id="tiktok_01")[0]
     for f in ("impressions", "clicks", "keyword", "ad_name"):
         assert r[f] is None
+    assert any("impressions" in f for f in r["dq_flags"])
+
+
+# ── Lazada ───────────────────────────────────────────────────
+LAZADA_ROWS = [
+    ["Seller Id: 100182681008"],
+    ["Seller Name: TNLTOOLSTORE"],
+    ["Data Type: Storewide Overview"],
+    ["Timing: 2026-08-22 20:07:07"],
+    [],
+    [],
+    ["วันที่", "ค่าใช้จ่าย", "ยอดรายได้", "คำสั่งซื้อ"],
+    ["20260815", "14163.25", "150730.0", "66"],
+    ["20260816", "8671.45", "95626.8", "55"],
+]
+
+
+def _lazada_xlsx(tmp_path):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for r in LAZADA_ROWS:
+        ws.append(r)
+    p = tmp_path / "100182681008-TNLTOOLSTORE-Storewide Overview-2026-08-22.xlsx"
+    wb.save(p)
+    return p
+
+
+def test_lazada_skips_file_header_block(tmp_path):
+    """หัวไฟล์ 4 บรรทัด + บรรทัดว่าง ต้องไม่หลุดมาเป็นข้อมูล
+
+    หัวตารางจริงอยู่แถว 7 แต่ห้ามฝังเลขไว้ เพราะ Lazada เพิ่มบรรทัดหัวไฟล์ได้
+    """
+    rows = parse_lazada_ads(_lazada_xlsx(tmp_path), shop_id="lazada_02")
+    assert len(rows) == 2
+    assert str(rows[0]["period_from"]) == "2026-08-15"
+
+
+def test_lazada_date_format_without_dashes(tmp_path):
+    """วันที่เป็น 20260815 ไม่มีขีดคั่น ต่างจาก TikTok ที่เป็น 2026-08-15 00:00:00"""
+    rows = parse_lazada_ads(_lazada_xlsx(tmp_path), shop_id="lazada_02")
+    assert str(rows[1]["period_from"]) == "2026-08-16"
+    assert rows[1]["period_from"] == rows[1]["period_to"]
+
+
+def test_lazada_records_which_report_it_came_from(tmp_path):
+    """Data Type ในหัวไฟล์ต้องถูกเก็บไว้
+
+    ถ้าวันหนึ่ง Lazada ยอมให้ดาวน์โหลดแยกตามแท็บ ค่านี้จะเปลี่ยน
+    แล้วเราจะรู้ทันทีว่าได้ไฟล์คนละชุดกับที่เคยได้
+    """
+    r = parse_lazada_ads(_lazada_xlsx(tmp_path), shop_id="lazada_02")[0]
+    assert r["date_collection_method"] == "per_day:Storewide Overview"
+
+
+def test_lazada_missing_metrics_are_none_with_reason(tmp_path):
+    """ไฟล์มีแค่ 4 คอลัมน์ — ที่เหลือต้องเป็น None ไม่ใช่ 0"""
+    r = parse_lazada_ads(_lazada_xlsx(tmp_path), shop_id="lazada_02")[0]
+    for f in ("impressions", "clicks", "roas", "keyword"):
+        assert r[f] is None, f"{f} ต้องเป็น None ไม่ใช่ {r[f]!r}"
     assert any("impressions" in f for f in r["dq_flags"])

@@ -21,7 +21,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ads.parser import parse_shopee_ads, parse_tiktok_ads   # noqa: E402
+from src.ads.parser import (parse_lazada_ads, parse_shopee_ads,   # noqa: E402
+                            parse_tiktok_ads)
 from src.core.config import load_config                     # noqa: E402
 from src.core.logging_setup import setup_logging           # noqa: E402
 
@@ -43,8 +44,8 @@ def main() -> int:
     setup_logging(PROJECT_ROOT / "logs", f"ads_{args.shop}")
 
     platform = load_config().shop(args.shop).platform
-    if platform not in ("shopee", "tiktok"):
-        ap.error(f"ยังไม่รองรับ {platform} — ตอนนี้มีแค่ shopee กับ tiktok")
+    if platform not in ("shopee", "tiktok", "lazada"):
+        ap.error(f"ยังไม่รองรับ {platform}")
 
     if args.parse_only:
         path = Path(args.parse_only)
@@ -57,14 +58,19 @@ def main() -> int:
             with ShopeeAdsFetcher(args.shop) as f:
                 path = f.fetch(_d(args.d_from), _d(args.d_to),
                                timeout_sec=args.timeout)
-        else:
+        elif platform == "tiktok":
             from src.ads.tiktok_ads import TikTokAdsFetcher
             with TikTokAdsFetcher(args.shop) as f:
                 path = f.fetch(_d(args.d_from), _d(args.d_to))
+        else:
+            from src.ads.lazada_ads import LazadaAdsFetcher
+            with LazadaAdsFetcher(args.shop) as f:
+                path = f.fetch(_d(args.d_from), _d(args.d_to))
         print(f"✅ ได้ไฟล์: {path.name}")
 
-    rows = (parse_shopee_ads(path, shop_id=args.shop) if platform == "shopee"
-            else parse_tiktok_ads(path, shop_id=args.shop))
+    parse = {"shopee": parse_shopee_ads, "tiktok": parse_tiktok_ads,
+             "lazada": parse_lazada_ads}[platform]
+    rows = parse(path, shop_id=args.shop)
     print(f"แปลงได้ {len(rows)} แถว")
 
     spend = sum(r["expense_thb"] for r in rows if r["expense_thb"])

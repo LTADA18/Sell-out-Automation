@@ -187,6 +187,68 @@ def _day_from_cell(raw: Any) -> date | None:
     return None
 
 
+LAZADA_MAP_FILE = PROJECT_ROOT / "config" / "column_maps" / "lazada_ads.yaml"
+
+
+def parse_lazada_ads(path: Path, shop_id: str) -> list[dict]:
+    """อ่านไฟล์ Storewide Overview ของ Lazada → แถวพร้อมโหลดขึ้นฐาน
+
+    โครงคล้าย TikTok (1 แถว = 1 วัน) แต่หัวไฟล์เป็นแบบ "Seller Id: xxx"
+    อยู่ในเซลล์เดียว ไม่ใช่ 2 คอลัมน์แบบ Shopee
+    """
+    import openpyxl
+
+    cfg = yaml.safe_load(LAZADA_MAP_FILE.read_text(encoding="utf-8"))
+    fields: dict[str, list[str]] = cfg["fields"]
+
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb.worksheets[0]
+    ws.reset_dimensions()
+    rows = [[("" if c is None else str(c)) for c in r]
+            for r in ws.iter_rows(values_only=True)]
+
+    header_i = find_header_row(rows, min_width=3)
+    header = [c.strip() for c in rows[header_i]]
+    pos = {h: i for i, h in enumerate(header)}
+    missing = [f for f, names in fields.items() if not any(n in pos for n in names)]
+
+    # หัวไฟล์บอกว่าเป็นไฟล์ชุดไหน — ใช้ตรวจว่าได้ของที่ตั้งใจ
+    meta_blob = " | ".join(" ".join(r) for r in rows[:header_i])
+    data_type = next((p.split(":", 1)[1].strip()
+                      for p in meta_blob.split("|") if "Data Type" in p), None)
+
+    out: list[dict] = []
+    for raw in rows[header_i + 1:]:
+        if not any(c.strip() for c in raw):
+            continue
+        day = _day_from_cell(raw[pos["วันที่"]] if "วันที่" in pos else None)
+        rec: dict[str, Any] = {
+            "platform": "lazada",
+            "shop_scope": shop_id,
+            "source_file": path.name,
+            "captured_dd_mm_yyyy": date.today(),
+            "date_collection_method": f"per_day:{data_type or 'unknown'}",
+            "period_from": day,
+            "period_to": day,
+        }
+        for field, names in fields.items():
+            col = next((pos[n] for n in names if n in pos), None)
+            val = raw[col] if col is not None and col < len(raw) else None
+            rec[field] = to_number(val) if field in NUMERIC else to_text(val)
+        rec.pop("period_day", None)
+
+        flags = [f"ไม่มีคอลัมน์ {f} ในไฟล์" for f in missing]
+        for f in cfg.get("unmapped", []):
+            rec.setdefault(f, None)
+            flags.append(f"{f} ไม่มีในรายงานนี้")
+        if day is None:
+            flags.append("อ่านวันที่จากคอลัมน์ 'วันที่' ไม่ได้")
+        rec["dq_flags"] = flags
+        out.append(rec)
+
+    return out
+
+
 def parse_tiktok_ads(path: Path, shop_id: str) -> list[dict]:
     """อ่านไฟล์ Campaign overview ของ TikTok → แถวพร้อมโหลดขึ้นฐาน"""
     import openpyxl
